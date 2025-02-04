@@ -1,0 +1,111 @@
+#! /bin/sh
+#
+# nginx-proxy.sh - a startup script for a simple ssl-terminating nginx proxy.
+#
+# (c) 2022 jw@owncloud.com - distribute under GPLv2 or ask.
+#
+# This proxy joins the default docker bridge network, althoug it is built with docker-compose.
+# Joining multiple networks (docker and also docker-compose ...) is apparently not possible.
+# See https://github.com/docker/compose/issues/3012, https://github.com/docker/compose/issues/3476
+
+
+if [ "$3" = "" -o "$1" = "-h" ]; then
+  cat <<USAGE
+Usage:
+  $0 HTTPS_PORT BACKEND_HTTP_SERVER SSL_CERT_FILE [SSL_KEY_FILE]
+
+  The HTTPS_PORT should be a free local port, where nginx will start listening for https requests.
+  If no SSL_KEY_FILE is given, the private key is expected to be in the same file as the certificate.
+  Before starting the proxy, the certificate is checked for validity (and matched against 'localhost' for information only)
+  For details about generating an ssl-cert.crt and .key with a local certificate authority see e.g. ~/HOWTO/ssl-cert.txt
+
+  Example:
+    $0 19443 http://172.17.0.1:9200 ../example.crt ../example.key
+
+    Then you can reach the service at http://172.17.0.1:9200 also at
+    - https://localhost:19443
+    and
+    - https://localhost:19443/subdomain-redirect
+USAGE
+  exit 1
+fi
+
+HTTPS_PORT="$1"
+BACKEND_HTTP_SERVER="$2"
+SSL_CERT_FILE="$3"
+SSL_KEY_FILE="$4"
+
+test -z "$SSL_KEY_FILE" && SSL_KEY_FILE="$SSL_CERT_FILE"
+# Volumes in docker-compose work as both, absolute and relative paths (but a / must be in the name).
+echo "$SSL_CERT_FILE" | grep -q / || SSL_CERT_FILE="./$SSL_CERT_FILE"
+echo "$SSL_KEY_FILE"  | grep -q / || SSL_KEY_FILE="./$SSL_KEY_FILE"
+
+# Assert, that the key is without passphrase:
+openssl rsa -noout < "$SSL_KEY_FILE" -passin pass:none -check || exit 1
+## Expected output, if it is with passphrase:
+# unable to load Private Key
+# 140358091203904:error:06065064:digital envelope routines:EVP_DecryptFinal_ex:bad decrypt:../crypto/evp/evp_enc.c:610:
+# 140358091203904:error:0906A065:PEM routines:PEM_do_header:bad decrypt:../crypto/pem/pem_lib.c:461:
+
+openssl x509 -noout < $SSL_CERT_FILE -enddate -subject
+## expected output:
+# notAfter=Apr 24 10:18:36 2022 GMT
+# subject=CN = collabora-20231123.jw-qa.owncloud.works
+openssl x509 -noout < $SSL_CERT_FILE -checkend 86400 >/dev/null || echo " ===== WARNING: Certificate epxires within 24h ===="
+
+
+test -f dhparam.pem || curl -s https://ssl-config.mozilla.org/ffdhe2048.txt > dhparam.pem
+
+mkdir -p conf.d
+cat << CONF > conf.d/nginx.conf
+server {
+    listen              80;
+    listen              443 ssl;
+    server_name         nginx.proxy;
+    ssl_certificate     /ssl-cert.crt;
+    ssl_certificate_key /ssl-cert.key;
+    # ssl_protocols       TLSv1 TLSv1.1 TLSv1.2;
+    # ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    location /subdomain-redirect/ {
+	# proxy_set_header	Host \$host;
+        # proxy_set_header        X-Real-IP \$remote_addr;
+        # proxy_set_header        X-Forwarded-For \$proxy_add_x_forwarded_for;
+        # proxy_set_header        X-Forwarded-Proto \$scheme;
+        proxy_pass 		$BACKEND_HTTP_SERVER;
+    }
+
+    location / {
+	# proxy_set_header	Host \$host;
+        # proxy_set_header        X-Real-IP \$remote_addr;
+        # proxy_set_header        X-Forwarded-For \$proxy_add_x_forwarded_for;
+        # proxy_set_header        X-Forwarded-Proto \$scheme;
+        proxy_pass 		$BACKEND_HTTP_SERVER;
+    }
+
+}
+CONF
+
+cat << DC_YML > docker-compose.yml
+version: "3"
+services:
+  nginx_ssl_proxy:
+    image: "nginx:latest"
+    command: "/usr/sbin/nginx -g 'daemon off;'"
+    ports:
+      - "$HTTPS_PORT:443"
+    volumes:
+      - "./dhparam.pem:/usr/local/etc/ssl/dhparam.pem"
+      - "./conf.d:/etc/nginx/conf.d"
+      - "$SSL_CERT_FILE:/ssl-cert.crt"
+      - "$SSL_KEY_FILE:/ssl-cert.key"
+
+    # The default 172.17.0.0/16 docker network is the "bridge".
+    # We want to join there, so that we can proxy for standalone docker containers.
+    network_mode: bridge
+
+DC_YML
+
+docker-compose up -d
+sleep 1
+docker-compose logs
