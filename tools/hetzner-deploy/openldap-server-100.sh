@@ -117,6 +117,25 @@ ou: groups
 
 EOF18
 
+$generate_ldif && cat << EOF19 > $ldif/19_samaccount_schema.ldif
+# This is a schema extension.
+# We add private attributes to objectclass jwextra. the class is loaded at startup already,
+# because I have not found a ways to load it with ldapadd during runtime. I always get permission denied.
+#
+# To use these attributes
+# - run ldapadd to load the file
+# - create a new object and add jwextra to its list of objectclasses.
+#
+# 1.3.6.1.4.1.39430	is the owncloud OID schema prefix.
+#  - we use 1.1.10, 1.1.11, 1.1.12, ... for attributes
+#  - and 1.3.2 for the class name
+dn: cn=samaccount,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: samaccount
+olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.4 NAME 'sAMAccountName' DESC 'Originally from LSDN, but openldap does not have that field.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.2 NAME 'samaccount' DESC 'samaccount LDAP Schema' AUXILIARY MAY ( sAMAccountName ) )
+EOF19
+
 $generate_ldif && cat <<EOF20 > $ldif/20_users.ldif
 
 # Start dn with uid (user identifier / login), not cn (Firstname + Surname)
@@ -126,7 +145,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
-objectClass: jwextra
+objectClass: samaccount
 uid: einstein
 givenName: Albert
 sn: Einstein
@@ -147,7 +166,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
-objectClass: jwextra
+objectClass: samaccount
 uid: marie
 givenName: Marie
 sn: Curie
@@ -167,7 +186,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
-objectClass: jwextra
+objectClass: samaccount
 uid: richard
 givenName: Richard
 sn: Feynman
@@ -189,7 +208,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
-objectClass: jwextra
+objectClass: samaccount
 uid: moss
 givenName: Jeff
 sn: Moss
@@ -279,10 +298,9 @@ $generate_ldif && cat << EOF40 > $ldif/40_jwextra_schema.ldif
 dn: cn=jwextra,cn=schema,cn=config
 objectClass: olcSchemaConfig
 cn: jwextra
-olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.4 NAME 'sAMAccountName' DESC 'Originally from LSDN, but openldap does not have that field.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
 olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.10 NAME 'color' DESC 'A generic name attribute.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
 olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.11 NAME 'fixID' DESC 'For testing custom attributes.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
-olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.2 NAME 'jwextra' DESC 'jwextra LDAP Schema' AUXILIARY MAY ( sAMAccountName $ color $ fixID ) )
+olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.3 NAME 'jwextra' DESC 'jwextra LDAP Schema' AUXILIARY MAY ( color $ fixID ) )
 EOF40
 
 # -------------------------- begin of lemmings generator
@@ -305,6 +323,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
+objectClass: samaccount
 objectClass: jwextra
 uid: $namepre$namecnt
 givenName: N$namecnt
@@ -340,7 +359,7 @@ function generate_users_and_group()
 
   cat << EOG
 
-dn: cn=${namepre}s,ou=groups,dc=jwqa,dc=org
+dn: cn=${groupname}s,ou=groups,dc=jwqa,dc=org
 objectClass: top
 objectClass: extensibleObject
 objectClass: posixGroup
@@ -389,16 +408,20 @@ ldapserver=$(docker inspect openldap | jq '.[0].NetworkSettings.IPAddress' -r)
 
 if [ "$ldapserver" == "null" ]; then
   echo "ERROR: failed to start openldap, retrying without --rm and --detach for better diagnostics."
+  sleep 2
   set -x
   docker run --name openldap $opts osixia/openldap --copy-service --loglevel debug
+  set +x
+  sleep 2
   echo ""
   echo "ERROR: failed to start openldap ... when done inspecting the issue, please clean up with: docker rm openldap"
+  echo "retry: docker run --rm --name openldap $opts osixia/openldap --copy-service --loglevel debug"
   exit 0
 fi
 
-ldapsearch -x -H ldap://$ldapserver:$ldapport -b dc=jwqa,dc=org -D "$admin_dn" -w "$admin_pass" -v
+ldapsearch -x -H ldap://$ldapserver -b dc=jwqa,dc=org -D "$admin_dn" -w "$admin_pass" -v
 
-docker run --rm -p 6443:443 --name phpldapadmin-server --env PHPLDAPADMIN_LDAP_HOSTS=$ldapserver:$ldapport --detach osixia/phpldapadmin
+docker run --rm -p 6443:443 --name phpldapadmin-server --env PHPLDAPADMIN_LDAP_HOSTS=$ldapserver --detach osixia/phpldapadmin
 
 cat << EOF6
 -----------------------------------------------
@@ -411,30 +434,34 @@ EOF6
 cat << EOF7
 -----------------------------------------------
 
- ldapsearch -x -H ldap://$ldapserver:$ldapport -b dc=jwqa,dc=org -D "$admin_dn" -w "$admin_pass" '(uid=lemming0123)'
+ ldapsearch -x -H ldap://$ldapserver -D $admin_dn -w $admin_pass -b dc=jwqa,dc=org '(uid=lemming012)'
 
-   uidNumber: 20123
+   uidNumber: 2012
    gidNumber: 30000
-   homeDirectory: /home/lemming0123
-   jwextra: blue
+   homeDirectory: /home/lemming012
+   color: blue
 
+ ldapsearch -x -H ldap://$ldapserver -D $admin_dn -w $admin_pass -b ou=groups,dc=jwqa,dc=org '(objectClass=*)' dn uniqueMember
+
+   # sailors, groups, jwqa.org
+   dn: cn=sailors,ou=groups,dc=jwqa,dc=org
+   uniqueMember: uid=einstein,ou=users,dc=jwqa,dc=org
+   uniqueMember: cn=hackers,ou=groups,dc=jwqa,dc=org
+   ...
 
 Extend the LDAP Schema
  - Edit ~/ldif/40_jwextra_schema.ldif
 	For each attribute add an olcAttributeTypes line.
 	Make sure all attributes in the file are listed in the olcObjectClasses line.
  - run (FIXME: ldapadd always fails. We must docker kill and restart)
-	ldapadd -H ldap://$ldapserver:$ldapport -D "$admin_dn" -w "$admin_pass" -v -f ldif/40_jwextra_schema.ldif
+	ldapadd -H ldap://$ldapserver -D "$admin_dn" -w "$admin_pass" -v -f ldif/40_jwextra_schema.ldif
  - Then create objects that inherit from objectclass jwextra or add jwextra to te objectclass list of existing objects.
  - Then ldapadmin should allow the new attributes for 'Add new attribute'
  - to update an existing Schema, (FIXME: ldapmodify always fails. Must docker kill and restart...)
     - Edit the file to include the line 'changetype: modify' as the second line.
     - Run
-	ldapmodify -H ldap://$ldapserver:$ldapport -D "$admin_dn" -w "$admin_pass" -v -f ldif/40_jwextra_schema.ldif
+	ldapmodify -H ldap://$ldapserver -D "$admin_dn" -w "$admin_pass" -v -f ldif/40_jwextra_schema.ldif
       still fails to update... No such object, Insufficient access, or similar.
 EOF7
-
-
-
 
 
