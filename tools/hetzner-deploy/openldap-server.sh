@@ -403,7 +403,7 @@ $generate_ldif && generate_users_and_group rabbit  1000 >> $ldif/45_lem1000.ldif
 
 ports="-p $ldapport:389 -p $ldapsport:636"
 mount="$ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom"
-opts="-v $mount $ports --env LDAP_ADMIN_PASSWORD=$admin_pass --env LDAP_ORGANISATION=ownCloud --env LDAP_DOMAIN=owncloud.com"
+opts="-v $mount $ports --env LDAP_CONFIG_PASSWORD=$admin_pass --env LDAP_ADMIN_PASSWORD=$admin_pass --env LDAP_ORGANISATION=ownCloud --env LDAP_DOMAIN=owncloud.com --env LDAP_READONLY_USER=true"
 
 docker container inspect -f 'openldap is already running' openldap 2> /dev/null && {
   echo " - to reload try:"
