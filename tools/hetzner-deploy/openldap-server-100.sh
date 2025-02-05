@@ -104,8 +104,8 @@ $generate_ldif && cat <<EOF18 > $ldif/18_ou.ldif
 # objectClass: top
 # objectClass: dcObject
 # objectClass: organization
-# o: owncloud
-# dc: owncloud
+# o: jwqa
+# dc: jwqa
 # -
 dn: ou=users,dc=jwqa,dc=org
 objectClass: organizationalUnit
@@ -117,10 +117,7 @@ ou: groups
 
 EOF18
 
-$generate_ldif && cat <<EOF2 > $ldif/20_users.ldif
-dn: ou=users,dc=jwqa,dc=org
-objectClass: organizationalUnit
-ou: users
+$generate_ldif && cat <<EOF20 > $ldif/20_users.ldif
 
 # Start dn with uid (user identifier / login), not cn (Firstname + Surname)
 dn: uid=einstein,ou=users,dc=jwqa,dc=org
@@ -129,6 +126,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
+objectClass: jwextra
 uid: einstein
 givenName: Albert
 sn: Einstein
@@ -149,6 +147,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
+objectClass: jwextra
 uid: marie
 givenName: Marie
 sn: Curie
@@ -168,6 +167,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
+objectClass: jwextra
 uid: richard
 givenName: Richard
 sn: Feynman
@@ -189,6 +189,7 @@ objectClass: organizationalPerson
 objectClass: person
 objectClass: posixAccount
 objectClass: top
+objectClass: jwextra
 uid: moss
 givenName: Jeff
 sn: Moss
@@ -201,12 +202,9 @@ uidNumber: 20002
 gidNumber: 30000
 homeDirectory: /home/jeff
 userPassword:: e1NTSEF9UllCcE1EdXlqTk92RjFxMlVzUHlXbHpMK1pLSE1NcjM=
-EOF2
+EOF20
 
-$generate_ldif && cat <<EOF3 > $ldif/30_groups.ldif
-dn: ou=groups,dc=jwqa,dc=jwqa,dc=org
-objectClass: organizationalUnit
-ou: groups
+$generate_ldif && cat <<EOF30 > $ldif/30_groups.ldif
 
 ## From https://stackoverflow.com/questions/8937248/ldap-error-invalid-structural-object-class-chain-organizationalunit-referral
 ## The objectClass: extensibleObject allows us to have multiple objectClasses.
@@ -264,9 +262,9 @@ description: Sailing ship lovers
 gidNumber: 30001
 uniqueMember: uid=einstein,ou=users,dc=jwqa,dc=org
 uniqueMember: cn=hackers,ou=groups,dc=jwqa,dc=org
-EOF3
+EOF30
 
-$generate_ldif && cat << EOF5 > $ldif/40_jwextra_schema.ldif
+$generate_ldif && cat << EOF40 > $ldif/40_jwextra_schema.ldif
 # This is a schema extension.
 # We add private attributes to objectclass jwextra. the class is loaded at startup already,
 # because I have not found a ways to load it with ldapadd during runtime. I always get permission denied.
@@ -281,10 +279,11 @@ $generate_ldif && cat << EOF5 > $ldif/40_jwextra_schema.ldif
 dn: cn=jwextra,cn=schema,cn=config
 objectClass: olcSchemaConfig
 cn: jwextra
-olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.10 NAME 'myname' DESC 'A generic name attribute.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.4 NAME 'sAMAccountName' DESC 'Originally from LSDN, but openldap does not have that field.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.10 NAME 'color' DESC 'A generic name attribute.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
 olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.11 NAME 'fixID' DESC 'For testing custom attributes.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
-olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.2 NAME 'jwextra' DESC 'jwextra LDAP Schema' AUXILIARY MAY ( name $ fixID ) )
-EOF5
+olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.2 NAME 'jwextra' DESC 'jwextra LDAP Schema' AUXILIARY MAY ( sAMAccountName $ color $ fixID ) )
+EOF40
 
 # -------------------------- begin of lemmings generator
 function generate_user()
@@ -319,7 +318,7 @@ uidNumber: $uidNumber
 gidNumber: 30000
 homeDirectory: /home/$namepre$namecnt
 userPassword:: $userPassword
-jwextra: $color
+color: $color
 
 EOU
 }
@@ -374,7 +373,7 @@ fi
 
 ports="-p $ldapport:389 -p $ldapsport:636"
 mount="$ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom"
-opts="-v $mount $ports --env LDAP_CONFIG_PASSWORD=$admin_pass --env LDAP_ADMIN_PASSWORD=$admin_pass --env LDAP_ORGANISATION="JW-QA Inc." --env LDAP_DOMAIN=jwqa.org --env LDAP_READONLY_USER=true"
+opts="-v $mount $ports --env LDAP_CONFIG_PASSWORD=$admin_pass --env LDAP_ADMIN_PASSWORD=$admin_pass --env LDAP_ORGANISATION=JW-QA-org --env LDAP_DOMAIN=jwqa.org --env LDAP_READONLY_USER=true"
 
 docker container inspect -f 'openldap is already running' openldap 2> /dev/null && {
   echo " - to reload try:"
