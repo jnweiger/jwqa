@@ -231,12 +231,12 @@ $generate_ldif && cat <<EOF30 > $ldif/30_groups.ldif
 ##
 ## posixGroup is a 'structural object class', but does not allow the 'uniqueMember' attribute.
 ## groupOfUniqueNames is a 'structural object class', but does not allow the 'gidNumber' attribute.
-## We can use one of the two, combined with 'objectClasses: extensibleObject' - to allow foreign attributes.
+## As LDAP only allows one 'structural object class', we use one of the two, combined with 'objectClasses: extensibleObject' - to allow foreign attributes.
 dn: cn=physics-lovers,ou=groups,dc=jwqa,dc=org
 objectClass: top
 objectClass: extensibleObject
 objectClass: posixGroup
-# objectClass: groupOfUniqueNames
+#objectClass: groupOfUniqueNames
 cn: physics-lovers
 description: Physics lovers
 gidNumber: 30007
@@ -259,7 +259,7 @@ uniqueMember: uid=jeff,ou=users,dc=jwqa,dc=org
 uniqueMember: uid=admin,ou=users,dc=jwqa,dc=org
 
 dn: cn=hackers,ou=groups,dc=jwqa,dc=org
-# objectClass: groupOfUniqueNames
+#objectClass: groupOfUniqueNames
 objectClass: extensibleObject
 objectClass: posixGroup
 objectClass: top
@@ -272,7 +272,7 @@ uniqueMember: uid=jeff,ou=users,dc=jwqa,dc=org
 ## The hackers group is nested in the sailors group.
 ## Therefore jeff should see things that are shared with sailors.
 dn: cn=sailors,ou=groups,dc=jwqa,dc=org
-# objectClass: groupOfUniqueNames
+#objectClass: groupOfUniqueNames
 objectClass: extensibleObject
 objectClass: posixGroup
 objectClass: top
@@ -308,7 +308,7 @@ function generate_user()
 {
   namepre=$1
   namecnt=$2
-  groupname=$2
+  groupname=$3		# todo add support for memberOf
   userPassword=e1NTSEF9WHlSZjJxcnMycXhSbkM4emVVV3lOMWVtVENqOVB0RVIK	# slappasswd -s secret | base64
   ucfirst=$(echo $namepre | sed -e 's/./\U&/')
   uidNumber=$(expr 20000 + $namecnt)
@@ -347,7 +347,7 @@ function generate_users_and_group()
   namepre=$1
   cnt_from=$2
   cnt_to=$3
-  groupname=$3
+  groupname=$4
 
   echo 1>&2 "+ generate_users_and_group $1 $2 ..."
   for u in $(seq -w $cnt_from $cnt_to); do
@@ -355,17 +355,23 @@ function generate_users_and_group()
   done
 
   ucfirst=$(echo $namepre | sed -e 's/./\U&/')
-  gidNumber=$(expr 30000 + $(echo $3 | sum | head -c 3))
+  # Strip the trailing 1 and leading zeroes from the result of sum.
+  # Good old expr would not foolishly assume octal, when seeing a leading 0, but modern (( )) does. Sigh.
+  hash16bit=$(echo $4 | sum | head -c 5 | sed -e 's/^0*//')
+  # use XOR to fold the value down to 10 bit, rouhly 3 decimal digits, so that we safely stay below 32767
+  hash10bit=$((($hash16bit & 0x3ff) ^ ($hash16bit >> 6)))
+  gidNumber=$((30000 + $hash10bit))
+  set +x
 
   cat << EOG
 
-dn: cn=${groupname}s,ou=groups,dc=jwqa,dc=org
+dn: cn=${groupname},ou=groups,dc=jwqa,dc=org
 objectClass: top
 objectClass: extensibleObject
-objectClass: posixGroup
-# objectClass: groupOfUniqueNames
-cn: group$groupname
-description: $ucfirst group
+#objectClass: posixGroup
+objectClass: groupOfUniqueNames
+cn: ${groupname}group
+description: $ucfirst group $groupname
 gidNumber: $gidNumber
 EOG
 
@@ -376,17 +382,19 @@ EOG
 }
 
 if $generate_ldif; then
-  generate_users_and_group lemming  0 009 lem0  >  $ldif/45_lem100.ldif
-  generate_users_and_group lemming 10 019 lem1  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 20 029 lem2  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 30 039 lem3  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 40 049 lem4  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 50 059 lem5  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 60 069 lem6  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 70 079 lem7  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 80 089 lem8  >> $ldif/45_lem100.ldif
-  generate_users_and_group lemming 90 099 lem9  >> $ldif/45_lem100.ldif
-  generate_users_and_group rabbit  1 100 rabbit >> $ldif/45_lem100.ldif
+  generate_users_and_group lemming  0 1 lem0  >  $ldif/45_lem100.ldif
+  generate_users_and_group lemming  3 3 lem3  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming  0 009 lem0  >  $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 10 019 lem1  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 20 029 lem2  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 30 039 lem3  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 40 049 lem4  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 50 059 lem5  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 60 069 lem6  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 70 079 lem7  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 80 089 lem8  >> $ldif/45_lem100.ldif
+#   generate_users_and_group lemming 90 099 lem9  >> $ldif/45_lem100.ldif
+#   generate_users_and_group rabbit  1 100 rabbit >> $ldif/45_lem100.ldif
 fi
 # -------------------------- end of lemmings generator
 
@@ -397,7 +405,7 @@ opts="-v $mount $ports --env LDAP_CONFIG_PASSWORD=$admin_pass --env LDAP_ADMIN_P
 docker container inspect -f 'openldap is already running' openldap 2> /dev/null && {
   echo " - to reload try:"
   echo "    docker kill openldap; docker rm openldap"
-  echo "    docker run --rm --name openldap $opts osixia/openldap --copy-service --loglevel debug"
+  echo "    docker run -d --rm --name openldap $opts osixia/openldap --copy-service --loglevel debug"
   exit 0
 }
 
