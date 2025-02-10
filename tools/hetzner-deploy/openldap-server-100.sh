@@ -157,7 +157,8 @@ mail: einstein@jwqa.org
 uidNumber: 20000
 gidNumber: 30000
 homeDirectory: /home/einstein
-userPassword:: e1NTSEF9TXJEcXpFNGdKbXZxbVRVTGhvWEZ1VzJBbkV3NWFLK3J3WTIvbHc9PQ==
+# secretpass
+userPassword:: e1NTSEF9cks5aEhmcDN3cldNQmk0aWdnT3ErNzFtWjJZMklrYmg=
 
 
 dn: uid=marie,ou=users,dc=jwqa,dc=org
@@ -178,7 +179,8 @@ mail: marie@jwqa.org
 uidNumber: 20001
 gidNumber: 30000
 homeDirectory: /home/marie
-userPassword:: e1NTSEF9UmFvQWs3TU9jRHBIUWY3bXN3MGhHNnVraFZQWnRIRlhOSUNNZEE9PQ==
+# secretpass
+userPassword:: e1NTSEF9cks5aEhmcDN3cldNQmk0aWdnT3ErNzFtWjJZMklrYmg=
 
 dn: uid=richard,ou=users,dc=jwqa,dc=org
 objectClass: inetOrgPerson
@@ -198,10 +200,11 @@ mail: richard@jwqa.org
 uidNumber: 20002
 gidNumber: 30000
 homeDirectory: /home/richard
-userPassword:: e1NTSEF9Z05LZTRreHdmOGRUREY5eHlhSmpySTZ3MGxSVUM1d1RGcWROTVE9PQ==
+# secretpass
+userPassword:: e1NTSEF9cks5aEhmcDN3cldNQmk0aWdnT3ErNzFtWjJZMklrYmg=
 
-# userPassword for Jeff Moss is hacker
-# It can be generated with: slappasswd -h '{SSHA}' -s hacker | tr -d '\n' | base64
+# userPassword for Jeff Moss is hackerpass
+# It can be generated with: # usr/sbin/slappasswd -h '{SSHA}' -s hackerpass | tr -d '\n' | base64
 dn: uid=jeff,ou=users,dc=jwqa,dc=org
 objectClass: inetOrgPerson
 objectClass: organizationalPerson
@@ -220,7 +223,7 @@ mail: jeff@jwqa.org
 uidNumber: 20002
 gidNumber: 30000
 homeDirectory: /home/jeff
-userPassword:: e1NTSEF9UllCcE1EdXlqTk92RjFxMlVzUHlXbHpMK1pLSE1NcjM=
+userPassword:: e1NTSEF9TnRLOExnbkpCaEEvSkVwbk1Sa0JmTUJiV3ZHNXkxSEM=
 EOF20
 
 $generate_ldif && cat <<EOF30 > $ldif/30_groups.ldif
@@ -309,7 +312,8 @@ function generate_user()
   namepre=$1
   namecnt=$2
   groupname=$3		# todo add support for memberOf
-  userPassword=e1NTSEF9WHlSZjJxcnMycXhSbkM4emVVV3lOMWVtVENqOVB0RVIK	# slappasswd -s secret | base64
+  # userPassword=e1NTSEF9WHlSZjJxcnMycXhSbkM4emVVV3lOMWVtVENqOVB0RVIK	# slappasswd -s secret | base64
+  userPassword=e1NTSEF9cks5aEhmcDN3cldNQmk0aWdnT3ErNzFtWjJZMklrYmg=	# slappasswd -s secretpass | base64
   ucfirst=$(echo $namepre | sed -e 's/./\U&/')
   uidNumber=$(expr 20000 + $namecnt)
   color=$(shuf -e red green blue white red -n 1)	# 40% red, 20% green, blue, white
