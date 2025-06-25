@@ -4,24 +4,36 @@
 # and a certificate.
 #
 # Assumptions:
-# - port 443 is currently unused.
+# - port 443 is unused.
 # - DNS entry exists.
-
+#
+# (C) 2025 j.weigert@heinlein-support.de - distribute under MIT License.
+#
+# 2025-06-24, v1.0 jw  - initial draught
+#
 
 if [ -z "$1" -o "$1" = "-h" -o "$1" = "--help" ]; then
   cat <<EOF
 
-Usage: 
+Usage:
   $0 DNSNAME
 
   Where DNSNAME should exist and point to this host.
 
-  Environment variables used:
+Environment variables used:
   export OC_BASE_DIR=/opt/oc	# Default: \$HOME/oc-run
-  	to set /opt/oc/data and /opt/oc/config as the persisted data and config directories.
-  export OC_VERSION=2.0.0	# Default: 3.0.0
+  	to set \$OC_BASE_DIR/data and \$OC_BASE_DIR/config as data and configuration directories.
+  export OC_VERSION=2.0.0	    # Default: 3.0.0
 
-  Example: $0 oc.jwqa.de
+Simple example:
+  $0 oc.jwqa.de    # from within a newly started machine with DNS name oc.jwqa.de
+
+Detailled example:
+  https://console.hetzner.cloud -> click PROJECTNAME -> Server -> Add Server
+  https://dns.hetzner.com -> click ZONENAME -> Add record -> Name oc.jwqa.de
+  scp ./ocinstall_bare.sh oc.jwqa.de:
+  ssh root@oc.jwqa.de bash ./ocinstall_bare.sh oc.jwqa.de
+
 EOF
   exit 1
 fi
