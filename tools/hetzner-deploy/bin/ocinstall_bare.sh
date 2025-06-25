@@ -1,0 +1,1 @@
+../../../ocinstall/ocinstall_bare.sh
