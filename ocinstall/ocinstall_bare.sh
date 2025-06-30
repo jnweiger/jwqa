@@ -1,15 +1,17 @@
 #! /bin/bash
 #
-# This runs the minimal install script with a pre-defined dns name.
+# This runs the minimal OpenCloud install script with a pre-defined dns name.
 # and a certificate.
 #
 # Assumptions:
+# - we run as root.
 # - port 443 is unused.
 # - DNS entry exists.
 #
 # (C) 2025 j.weigert@heinlein-support.de - distribute under MIT License.
 #
 # 2025-06-24, v1.0 jw  - initial draught
+# 2025-06-30, v1.1 jw  - more flexiility with certificates and natted IP addresses
 #
 
 if [ -z "$1" -o "$1" = "-h" -o "$1" = "--help" ]; then
@@ -21,9 +23,13 @@ Usage:
   Where DNSNAME should exist and point to this host.
 
 Environment variables used:
-  export OC_BASE_DIR=/opt/oc	# Default: \$HOME/oc-run
-  	to set \$OC_BASE_DIR/data and \$OC_BASE_DIR/config as data and configuration directories.
-  export OC_VERSION=2.0.0	    # Default: 3.0.0
+  export OC_BASE_DIR=/opt/oc    # To set \$OC_BASE_DIR/data and \$OC_BASE_DIR/config as data and configuration directories.
+                                # Default: \$HOME/oc-run
+  export OC_CERT_DIR=/var/snap/.../certs/certbot/config/
+                                # Location of the files fullchain.pem and privkey.pem
+                                # /live/ or /live/DNSNAME are appended if th folders exist.
+                                # Default: /etc/letsencrypt
+  export OC_VERSION=2.0.0	# Default: 3.0.0
 
 Simple example:
   $0 oc.jwqa.de    # from within a newly started machine with DNS name oc.jwqa.de
@@ -43,12 +49,13 @@ github_url="https://github.com/opencloud-eu/opencloud"
 dnsname=$1
 # oc.jwqa.de has address 65.21.178.225
 dns_ip=$(host -4 "$dnsname" | sed -e 's/.* //')
-# 65.21.178.225 2a01:4f9:c012:dd1d::1 
+# 65.21.178.225 2a01:4f9:c012:dd1d::1
 my_ip=$(hostname -I | sed -e 's/ .*//')
 
 if [ "$dns_ip" != "$my_ip" ]; then
-  echo "ERROR: dns name $dnsname resolves to $dns_ip, but this host is $my_ip"
-  exit 2
+  echo "WARNING: dns name $dnsname resolves to $dns_ip, but this host is $my_ip"
+  echo "         Press ENTER to continue, CTRL-C to abort"
+  read a
 fi
 
 export OC_HOST="$dnsname"
@@ -56,20 +63,33 @@ test -z "$OC_VERSION"  && export OC_VERSION=3.0.0
 test -z "$OC_BASE_DIR" && export OC_BASE_DIR=$HOME/oc-run
 mkdir -p "$OC_BASE_DIR"		# make sure the directory exists.
 
-if [ ! -d "/etc/letsencrypt/live/$dnsname" ]; then
-  type certbot || (apt update; apt install certbot)
-  # get a certificate into the ./cert folder.
-  ## TODO: assert that no webserver is running "here".
-  certbot certonly --standalone -d "$dnsname" --email "cert@$dnsname" --agree-tos --non-interactive
+if [ ! -z "$OC_CERT_DIR" ]; then
+
+  # make OC_CERT_DIR work with /live, /live/$dnsname suffix, or without.
+  test -d "$OC_CERT_DIR/live" && exort OC_CERT_DIR="$OC_CERT_DIR/live"
+  test -d "$OC_CERT_DIR/$dnsname" && exort OC_CERT_DIR="$OC_CERT_DIR/$dnsname"
+
+  export PROXY_TRANSPORT_TLS_CERT="$OC_CERT_DIR/fullchain.pem"
+  export PROXY_TRANSPORT_TLS_KEY="$OC_CERT_DIR/privkey.pem"
+
+else
+
+  if [ ! -d "/etc/letsencrypt/live/$dnsname" ]; then
+    type certbot || (apt update; apt install certbot)
+    # get a certificate into the ./cert folder.
+    ## TODO: assert that no webserver is running "here".
+    certbot certonly --standalone -d "$dnsname" --email "cert@$dnsname" --agree-tos --non-interactive
+  fi
+
+  # Successfully received certificate.
+  # Certificate is saved at: /etc/letsencrypt/live/oc.jwqa.de/fullchain.pem
+  # Key is saved at:         /etc/letsencrypt/live/oc.jwqa.de/privkey.pem
+
+  ## documented with OCIS. it may still work with opencloud?
+  export PROXY_TRANSPORT_TLS_CERT="/etc/letsencrypt/live/$dnsname/fullchain.pem"
+  export PROXY_TRANSPORT_TLS_KEY="/etc/letsencrypt/live/$dnsname/privkey.pem"
+
 fi
-
-# Successfully received certificate.
-# Certificate is saved at: /etc/letsencrypt/live/oc.jwqa.de/fullchain.pem
-# Key is saved at:         /etc/letsencrypt/live/oc.jwqa.de/privkey.pem
-
-## documented with OCIS. it may still work with opencloud?
-export PROXY_TRANSPORT_TLS_CERT="/etc/letsencrypt/live/$dnsname/fullchain.pem"
-export PROXY_TRANSPORT_TLS_KEY="/etc/letsencrypt/live/$dnsname/privkey.pem"
 
 test -d opencloud || git clone --depth 1 "$github_url"
 (cd opencloud; git pull --rebase)
@@ -102,7 +122,7 @@ set -x
 export PROXY_TRANSPORT_TLS_CERT="/etc/letsencrypt/live/$dnsname/fullchain.pem"
 export PROXY_TRANSPORT_TLS_KEY="/etc/letsencrypt/live/$dnsname/privkey.pem"
 
-\$SCRIPT_DIR/$sandboxdir/runopencloud.sh & 
+\$SCRIPT_DIR/$sandboxdir/runopencloud.sh &
 EOF
 
 chmod a+x ocstart.sh ocstop.sh
