@@ -12,7 +12,10 @@
 #
 # 2025-06-24, v1.0 jw  - initial draught
 # 2025-06-30, v1.1 jw  - more flexiility with certificates and natted IP addresses
+# 2025-09-06, v1.2 jw  - fixed dns response 127.0.1.1
 #
+
+set -e
 
 if [ -z "$1" -o "$1" = "-h" -o "$1" = "--help" ]; then
   cat <<EOF
@@ -27,9 +30,9 @@ Environment variables used:
                                 # Default: \$HOME/oc-run
   export OC_CERT_DIR=/var/snap/.../certs/certbot/config/
                                 # Location of the files fullchain.pem and privkey.pem
-                                # /live/ or /live/DNSNAME are appended if th folders exist.
+                                # /live/ or /live/DNSNAME are appended if the folders exists.
                                 # Default: /etc/letsencrypt
-  export OC_VERSION=2.0.0	# Default: 3.0.0
+  export OC_VERSION=3.0.0	# Default: 3.4.0, see https://docs.opencloud.eu/docs/admin/resources/lifecycle
 
 Simple example:
   $0 oc.jwqa.de    # from within a newly started machine with DNS name oc.jwqa.de
@@ -50,6 +53,18 @@ dnsname=$1
 # oc.jwqa.de has address 65.21.178.225
 dns_ip=$(host -4 "$dnsname" | sed -e 's/.* //')
 # 65.21.178.225 2a01:4f9:c012:dd1d::1
+# this is unreliable, it may just say 127.0.X.1, in this cas ask an authorative name server
+case "$dns_ip" in
+  127.* )
+    # host -d includes the SOA record, which has a nameserver next to the word SOA. E.g.
+    # jwqa.de. 3295 IN SOA hydrogen.ns.hetzner.com. dns.hetzner.com. 2025090701 86400 10800 3600000 3600
+    ns=$(host -d oc.jwqa.de | sed -ne 's/.*\sSOA\s*//p' | sed -e 's/\.\?\s.*//')
+    echo "... using DNS server: $ns"
+    dns_ip=$(host -4 "$dnsname" "$ns" | sed -ne 's/.*\shas address\s//p')
+    ;;
+esac
+
+
 my_ip=$(hostname -I | sed -e 's/ .*//')
 
 if [ "$dns_ip" != "$my_ip" ]; then
@@ -59,7 +74,7 @@ if [ "$dns_ip" != "$my_ip" ]; then
 fi
 
 export OC_HOST="$dnsname"
-test -z "$OC_VERSION"  && export OC_VERSION=3.0.0
+test -z "$OC_VERSION"  && export OC_VERSION=3.4.0
 test -z "$OC_BASE_DIR" && export OC_BASE_DIR=$HOME/oc-run
 mkdir -p "$OC_BASE_DIR"		# make sure the directory exists.
 
@@ -89,6 +104,8 @@ else
   export PROXY_TRANSPORT_TLS_CERT="/etc/letsencrypt/live/$dnsname/fullchain.pem"
   export PROXY_TRANSPORT_TLS_KEY="/etc/letsencrypt/live/$dnsname/privkey.pem"
 
+  echo sleep 10
+  sleep 10
 fi
 
 test -d opencloud || git clone --depth 1 "$github_url"
