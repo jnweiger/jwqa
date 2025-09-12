@@ -61,7 +61,7 @@ def save_cropped(img):
     return outname
 
 
-for i in range(int(imgcount)):
+for i in range(1, int(imgcount)+1):
     name = save_cropped(img)
     if i % 50 == 0: print(f"{i} \t{name}")
 
