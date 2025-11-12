@@ -13,7 +13,9 @@
 # 2025-06-24, v1.0 jw  - initial draught
 # 2025-06-30, v1.1 jw  - more flexiility with certificates and natted IP addresses
 # 2025-09-06, v1.2 jw  - fixed dns response 127.0.1.1
-#
+# 2025-11-10, v1.3 jw  - prepare for update scenario, FIXME: bare-metal-simple/install.sh also needs to learn about updates.
+#                        support for serverlog added.
+#                        support for multiple instances (with different dns names) on the same host.
 
 set -e
 
@@ -27,7 +29,7 @@ Usage:
 
 Environment variables used:
   export OC_BASE_DIR=/opt/oc    # To set \$OC_BASE_DIR/data and \$OC_BASE_DIR/config as data and configuration directories.
-                                # Default: \$HOME/oc-run
+                                # Default: \$HOME/oc-run/DNSNAME
   export OC_CERT_DIR=/var/snap/.../certs/certbot/config/
                                 # Location of the files fullchain.pem and privkey.pem
                                 # /live/ or /live/DNSNAME are appended if the folders exists.
@@ -71,11 +73,13 @@ if [ "$dns_ip" != "$my_ip" ]; then
   echo "WARNING: dns name $dnsname resolves to $dns_ip, but this host is $my_ip"
   echo "         Press ENTER to continue, CTRL-C to abort"
   read a
+else
+  echo "IP Address $dns_ip of $dnsname matches this host. Good."
 fi
 
 export OC_HOST="$dnsname"
 test -z "$OC_VERSION"  && export OC_VERSION=3.4.0
-test -z "$OC_BASE_DIR" && export OC_BASE_DIR=$HOME/oc-run
+test -z "$OC_BASE_DIR" && export OC_BASE_DIR=$HOME/oc-run/$dnsname
 mkdir -p "$OC_BASE_DIR"		# make sure the directory exists.
 
 if [ ! -z "$OC_CERT_DIR" ]; then
@@ -94,6 +98,8 @@ else
     # get a certificate into the ./cert folder.
     ## TODO: assert that no webserver is running "here".
     certbot certonly --standalone -d "$dnsname" --email "cert@$dnsname" --agree-tos --non-interactive
+    echo sleep 10
+    sleep 10
   fi
 
   # Successfully received certificate.
@@ -103,9 +109,6 @@ else
   ## documented with OCIS. it may still work with opencloud?
   export PROXY_TRANSPORT_TLS_CERT="/etc/letsencrypt/live/$dnsname/fullchain.pem"
   export PROXY_TRANSPORT_TLS_KEY="/etc/letsencrypt/live/$dnsname/privkey.pem"
-
-  echo sleep 10
-  sleep 10
 fi
 
 test -d opencloud || git clone --depth 1 "$github_url"
@@ -127,6 +130,15 @@ sleep 5
 sandboxdir="$(ls -drt opencloud-sandbox-* | tail -1)"
 oc_bin="$(cd "$sandboxdir"; ls opencloud-* | tail -1)"
 
+echo	# probably in the middle of the download progress bar.
+if [ -f ocstart.sh ]; then
+  echo "updating ocstart.sh and ocstop.sh for $sandboxdir"
+else
+  echo "creating ocstart.sh and ocstop.sh for $sandboxdir"
+fi
+
+test -f ocstop.sh && cp ocstop.sh ocstop-old.sh		# when updating...
+
 cat <<EOF>ocstop.sh
 killall $oc_bin
 EOF
@@ -138,6 +150,11 @@ set -x
 
 export PROXY_TRANSPORT_TLS_CERT="/etc/letsencrypt/live/$dnsname/fullchain.pem"
 export PROXY_TRANSPORT_TLS_KEY="/etc/letsencrypt/live/$dnsname/privkey.pem"
+
+logdir=\$SCRIPT_DIR/$sandboxdir/log
+mkdir -p "\$logdir"
+export OC_LOG_FILE="\$logdir/opencloud.log"
+test -f "\$OC_LOG_FILE" && mv "\$OC_LOG_FILE" "\$OC_LOG_FILE.\$(date +%Y%m%d)"
 
 \$SCRIPT_DIR/$sandboxdir/runopencloud.sh &
 EOF
