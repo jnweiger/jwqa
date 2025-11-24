@@ -5,7 +5,8 @@
 #
 # Assumptions:
 # - we run as root.
-# - port 443 is unused.
+# - port 80 and port 443 are unused.
+# - no other instance of opencloud runs on this host. E.g. 127.0.0.1:9250 must be unused.
 # - DNS entry exists.
 #
 # (C) 2025 j.weigert@heinlein-support.de - distribute under MIT License.
@@ -15,7 +16,11 @@
 # 2025-09-06, v1.2 jw  - fixed dns response 127.0.1.1
 # 2025-11-10, v1.3 jw  - prepare for update scenario, FIXME: bare-metal-simple/install.sh also needs to learn about updates.
 #                        support for serverlog added.
-#                        support for multiple instances (with different dns names) on the same host.
+#                        partly support for multiple instances (with different dns names and only one at a time) on the same host.
+#                        use curl to check, if a URL is 404, before trying,
+#                        	- we never know if there is a v infront of the version number or not.
+#                        	- we never know if there is a dot between beta/rc and the number.
+#                        curl -I -L -o /dev/null -s -w "%{http_code}\n" https://github.com/opencloud-eu/opencloud/releases/download/4.0.0-rc.1/opencloud-4.0.0-rc.1-linux-arm64
 
 set -e
 
@@ -77,6 +82,9 @@ else
   echo "IP Address $dns_ip of $dnsname matches this host. Good."
 fi
 
+#TODO: test for: listen tcp 127.0.0.1:9250: bind: address already in use
+# do not proceed if that address is already in use. opencloud needs this and many more local port numbers.
+
 export OC_HOST="$dnsname"
 test -z "$OC_VERSION"  && export OC_VERSION=3.4.0
 test -z "$OC_BASE_DIR" && export OC_BASE_DIR=$HOME/oc-run/$dnsname
@@ -112,7 +120,7 @@ else
 fi
 
 test -d opencloud || git clone --depth 1 "$github_url"
-(cd opencloud; git pull --rebase)
+(cd opencloud; git pull --rebase || true)
 
 init_sh="$(pwd)/opencloud/deployments/examples/bare-metal-simple/install.sh"
 
@@ -140,6 +148,12 @@ fi
 test -f ocstop.sh && cp ocstop.sh ocstop-old.sh		# when updating...
 
 cat <<EOF>ocstop.sh
+#!/bin/bash
+#
+# FIXME: should not use killall, but kill only this instance.
+# Maybe we can check env variables. e.g.
+# OC_BASE_DIR -eq $OC_BASE_DIR ??
+set -x
 killall $oc_bin
 EOF
 
