@@ -79,7 +79,8 @@ if [ "$1" == "add" ]; then
     echo 1>&2 "$0 ERROR: add needs two parameters: NAME IP_ADDR"
     exit 1
   fi
-  (set -x; hcloud zone rrset add-records --record $ipaddr $HCLOUD_DNS_ZONE $name A)
+  # set-records is a create_or_update command.
+  (set -x; hcloud zone rrset set-records --record $ipaddr $HCLOUD_DNS_ZONE $name A)
   exit 0
 fi
 

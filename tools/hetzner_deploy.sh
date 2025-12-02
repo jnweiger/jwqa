@@ -196,7 +196,7 @@ fi
 for dns in $DNS_NAMES; do
   dns="${dns%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.
   # create or update
-  (set -x; hcloud zone rrset add-records --record $IPADDR $HCLOUD_DNS_ZONE $dns A || hcloud zone rrset set-records --record $IPADDR $HCLOUD_DNS_ZONE $dns A)
+  (set -x; hcloud zone rrset set-records --record $IPADDR $HCLOUD_DNS_ZONE $dns A)
 done
 
 # install a letsencrypt certificate
