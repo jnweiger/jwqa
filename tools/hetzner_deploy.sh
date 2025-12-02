@@ -100,7 +100,7 @@ test -z "$HCLOUD_TYPE" && HCLOUD_TYPE=$default_hcloud_type
 test -z "$HCLOUD_IMAGE" && HCLOUD_IMAGE=$default_hcloud_image
 test -z "$dns_names" && dns_names=$(echo "$HCLOUD_IMAGE-DATE" | tr '._' '-')
 DNS_NAMES="$(echo "$DNS_NAMES" | sed -e "s@DATE@$(date +%Y%m%d)@")"
-name="$(echo "$DNS_NAMES" | head -n1)"		# first element, if its a list.
+set_name_and_check_zone "$(echo "$DNS_NAMES" | head -n1)"		# first element, if its a list.
 
 FQDNS="$(echo "$DNS_NAMES" | sed -e "s/$/.$HCLOUD_DNS_ZONE/")"
 
@@ -193,9 +193,10 @@ END
 fi
 
 # obtain dns names
-set -x
-echo TODO: dns names -- else certbot will fail
-sleep 100
+for dns in $DNS_NAMES; do
+  dns="${dns%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.
+  (set -x; hcloud zone rrset add-records --record $IPADDR $HCLOUD_DNS_ZONE $dns A)
+done
 
 # install a letsencrypt certificate
 d_opts="$(echo \ $FQDNS | sed -e 's/\s\b/ -d /g')"
