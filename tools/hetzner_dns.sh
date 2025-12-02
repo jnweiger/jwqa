@@ -103,6 +103,7 @@ if [ "$1" == "del" ]; then
   matches=$(echo "$a_records" | grep "\"$name\"" | tr -d '"[]')
   # av      46.62.160.228
   # foo     46.62.160.228
-
-  echo "$matches"
+  while read name ipaddr; do
+    (set -x; hcloud zone rrset remove-records --record $ipaddr $HCLOUD_DNS_ZONE $name A)
+  done <<< $matches
 fi
