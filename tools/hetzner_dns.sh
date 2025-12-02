@@ -21,14 +21,14 @@ fi
 
 if [ -z "$HCLOUD_TOKEN" ]; then
   echo 1>&2 "$0 ERROR: env variable HCLOUD_TOKEN is not set."
-  echo 1>&2 "\t Visit https://console.hetzner.com -> Select your Project -> Security -> API-Tokens -> Add ..."
+  echo 1>&2 "	Visit https://console.hetzner.com -> Select your Project -> Security -> API-Tokens -> Add ..."
   exit 1
 fi
 vers=$(hcloud version 2>/dev/null)
 if [ -z "$vers" ]; then
   echo 1>&2 "$0 ERROR: hcloud comand is not installed correctly."
-  echo 1>&2 "\t Visit https://github.com/hetznercloud/cli/releases/latest"
-  echo 1>&2 "\t or try:	go install github.com/hetznercloud/cli/cmd/hcloud@latest"
+  echo 1>&2 "	Visit https://github.com/hetznercloud/cli/releases/latest"
+  echo 1>&2 "	or try:	go install github.com/hetznercloud/cli/cmd/hcloud@latest"
   exit 1
 fi
 
@@ -40,7 +40,7 @@ if [ -z "$1" -o "$1" == "list" ]; then
   hcloud zone rrset list $HCLOUD_DNS_ZONE
   if [ -z "$1" ]; then
     echo 1>&2 ""
-    echo 1>&2 "use:		$0 add|del [IP_ADDR] [FQDN]"
+    echo 1>&2 "use:		$0 add|del [FQDN] [IP_ADDR]"
   fi  
 fi  
 
@@ -86,10 +86,23 @@ fi
 if [ "$1" == "del" ]; then
   set_name_and_check_zone "$2"
   ipaddr="$3"
-  if [ -z "$name" -o -z "$ipaddr" ]; then
-    echo 1>&2 "$0 ERROR: sorry, del currently needs two parameters: NAME IP_ADDR"
+
+  if [ -z "$name" -a -z "$ipaddr" ]; then
+    echo 1>&2 "$0 ERROR: delete needs at least one of NAME or IP_ADDR"
     exit 1
   fi
-  (set -x; hcloud zone rrset remove-records --record $ipaddr $HCLOUD_DNS_ZONE $name A)
-  exit 0
+
+  if [ -n "$name" -a -n "$ipaddr" ]; then
+    (set -x; hcloud zone rrset remove-records --record $ipaddr $HCLOUD_DNS_ZONE $name A)
+    exit 0
+  fi
+
+  a_records=$(hcloud zone rrset list jwqa.de -o json | jq -r '.[] | select(.type == "A") | "\"\(.name)\"\t\([.records[].value | tostring])"')
+  # $verbose && echo "$a_records"
+  
+  matches=$(echo "$a_records" | grep "\"$name\"" | tr -d '"[]')
+  # av      46.62.160.228
+  # foo     46.62.160.228
+
+  echo "$matches"
 fi
