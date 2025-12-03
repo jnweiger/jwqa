@@ -123,7 +123,7 @@ test -z "$IPADDR" && exit 1
 IPV6ADDR="$(hcloud server ip -6 "$name")"
 # inspect server metadata, with a little retry, in case we get "hcloud: (server error)"
 describe_json="$(hcloud server describe "$name" -o json || { echo 1>&2 "retrying hcloud describe ..."; sleep 3;  hcloud server describe "$name" -o json; } )"
-HCLOUD_DATACENTER="$(   echo "$describe_json" | jq .server_type.cores -r)"
+HCLOUD_DATACENTER="$(   echo "$describe_json" | jq .datacenter.name -r)"
 HCLOUD_SERVER_CORES="$( echo "$describe_json" | jq .server_type.cores -r)"
 HCLOUD_SERVER_MEMORY="$(echo "$describe_json" | jq .server_type.memory -r)"
 HCLOUD_SERVER_DISK="$(  echo "$describe_json" | jq .server_type.disk -r)"
@@ -139,6 +139,7 @@ ssh-keygen -f ~/.ssh/known_hosts -R $IPADDR     # needed to make life easier lat
 # StrictHostKeyChecking=no automatically adds new host keys and accepts changed host keys.
 # maybe 'ssh -o UserKnownHostsFile=/dev/null' helps?
 
+# It may take a while, until the server is ready for ssh connections. Poll that.
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 last; do
   to=5
   test "$i" -gt 10 && to=15
