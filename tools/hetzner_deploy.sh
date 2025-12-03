@@ -12,7 +12,7 @@ default_hcloud_type=cpx21
 
 if [ -z "$1" -o "$1" == "--help" -o "$1" == "-h" ]; then
   cat <<EOF 1>&2
-Usage: 
+Usage:
 
 	export HCLOUD_TOKEN=...
 	export HCLOUD_DNS_ZONE=...
@@ -70,18 +70,18 @@ set_name_and_check_zone()
       echo 1>&2 "$0 ERROR: $name is not an FQDN in:" $zones
       echo 1>&2 "Please give a full qualified domain name, or set HCLOUD_DNS_ZONE."
       exit 1
-    fi 
+    fi
   fi
   name="${name%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.
 }
 
 script="$1"
-test -f "$script.sh" && script="$script.sh" 
+test -f "$script.sh" && script="$script.sh"
 
 if [ ! -f "$script" ]; then
   mydir="$(dirname "$(readlink -f "$0")")"
-  test -f "$mydir/$script"    && script="$mydir/$script" 
-  test -f "$mydir/$script.sh" && script="$mydir/$script.sh" 
+  test -f "$mydir/$script"    && script="$mydir/$script"
+  test -f "$mydir/$script.sh" && script="$mydir/$script.sh"
 fi
 if [ ! -f "$script" ]; then
   echo 1>&2 "$0 ERROR: could not find $script"
@@ -121,13 +121,19 @@ IPADDR="$(hcloud server ip "$name")"
 test -z "$IPADDR" && exit 1
 
 IPV6ADDR="$(hcloud server ip -6 "$name")"
-describe_json="$(hcloud server describe av -o json)"
-HCLOUD_DATACENTER="$(   echo "$describe_json" | jq .datacenter.name -r)"
+# inspect server metadata, with a little retry, in case we get "hcloud: (server error)"
+describe_json="$(hcloud server describe "$name" -o json || { echo 1>&2 "retrying hcloud describe ..."; sleep 3;  hcloud server describe "$name" -o json; } )"
 HCLOUD_DATACENTER="$(   echo "$describe_json" | jq .server_type.cores -r)"
 HCLOUD_SERVER_CORES="$( echo "$describe_json" | jq .server_type.cores -r)"
 HCLOUD_SERVER_MEMORY="$(echo "$describe_json" | jq .server_type.memory -r)"
 HCLOUD_SERVER_DISK="$(  echo "$describe_json" | jq .server_type.disk -r)"
 
+# prepare dns names as early as possible
+for dns in $DNS_NAMES; do
+  dns="${dns%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.
+  # create or update
+  (set -x; hcloud zone rrset set-records --record $IPADDR $HCLOUD_DNS_ZONE $dns A)
+done
 
 ssh-keygen -f ~/.ssh/known_hosts -R $IPADDR     # needed to make life easier later.
 # StrictHostKeyChecking=no automatically adds new host keys and accepts changed host keys.
@@ -148,13 +154,6 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 last; do
 done
 
 $verbose && echo "$IPADDR is ready."
-
-# obtain dns names
-for dns in $DNS_NAMES; do
-  dns="${dns%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.
-  # create or update
-  (set -x; hcloud zone rrset set-records --record $IPADDR $HCLOUD_DNS_ZONE $dns A)
-done
 
 # generate env.sh
 env_sh="$(cat <<EOF
@@ -194,14 +193,41 @@ END
         yum install -y $extra_pkg
 END
         ;;
-    *) echo "$0 WARNING: platform installer not implemented for $HCLOUD_IMAGE. Skipping package installation of $extra_pkg"
+    *) echo 1>&2 "$0 WARNING: platform installer not implemented for $HCLOUD_IMAGE. Skipping package installation of $extra_pkg"
         ;;
   esac
 fi
 
-# install a letsencrypt certificate
+# enable apache ssl, so that certbot can install a cert
+ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; systemctl restart apache2'"
+
+# infuse all dns names into the default-ssl.conf so that certbot does not ask questions.
+ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerAlias $(echo $FQDNS)'" /etc/apache2/sites-available/default-ssl.conf
+ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $(echo "$FQDNS" | head -n1)'" /etc/apache2/sites-available/default-ssl.conf
+
+
+## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf alread exists.
+## prepare renewal config, so that certbot won't ask questions.
+## The name of the config derives from the first domain. That is what certbot does, we do that too.
+# cat <<EOF | ssh root@$IPADDR "cat > '/etc/letsencrypt/renewal/$(echo "$FQDNS" | head -n 1).conf'"
+# [renewalparams]
+# installer = apache
+# apache_vhost_config = /etc/apache2/sites-available/default-ssl.conf
+# EOF
+
+# install a letsencrypt certificate (with retry, DNS may not yet be ready...)
+# TODO: this install only works partially, when we have multiple domains in d_opts.
 d_opts="$(echo \ $FQDNS | sed -e 's/\s\b/ -d /g')"
-ssh root@$IPADDR certbot -m qa@jwqa.de --no-eff-email --agree-tos --redirect --apache --deploy-hooks $d_opts
+certbot_opts="--non-interactive -m qa@jwqa.de --no-eff-email --agree-tos --redirect --apache $d_opts"
+echo "+ certbot $certbot_opts"
+ssh root@$IPADDR certbot $certbot_opts || {
+  echo "Oh, certbot failed?, let's wait 30sec and try again"
+  sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5
+  ssh root@$IPADDR certbot $certbot_opts || {
+    echo "Oh, certbot failed again?, let's try with certonly, without installing into apache"
+    ssh root@$IPADDR certbot certonly $certbot_opts
+  }
+}
 
 # transfer and run the intialization script on the target host.
 echo "$env_sh" | ssh root@$IPADDR "cat > env.sh"
