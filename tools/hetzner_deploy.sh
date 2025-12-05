@@ -40,8 +40,8 @@ if [ -z "$vers" ]; then
   exit 1
 fi
 
-if [ -z "$HCLOUD_SSH_KEYS" ]; then
-  echo 1>&2 "$0 ERROR: env variable HCLOUD_SSH_KEYS is not set."
+if [ -z "$HCLOUD_SSHKEY_NAMES" ]; then
+  echo 1>&2 "$0 ERROR: env variable HCLOUD_SSHKEY_NAMES is not set."
   echo 1>&2 "see available keys with: hcloud ssh-key list"
   exit 1
 fi
@@ -105,7 +105,7 @@ set_name_and_check_zone "$(echo "$DNS_NAMES" | head -n1)"		# first element, if i
 FQDNS="$(echo "$DNS_NAMES" | sed -e "s/$/.$HCLOUD_DNS_ZONE/")"
 
 ssh_key_opts=''
-for key in $(echo "$HCLOUD_SSH_KEYS" | tr ',' ' '); do
+for key in $(echo "$HCLOUD_SSHKEY_NAMES" | tr ',' ' '); do
   ssh_key_opts="$ssh_key_opts --ssh-key $key"
 done
 
