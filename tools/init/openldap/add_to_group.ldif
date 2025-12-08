@@ -1,0 +1,4 @@
+dn: uid=usera,ou=people,dc=jwqa,dc=org
+changetype: modify
+add: memberOf
+memberOf: cn=ownclouders,ou=groups,dc=jwqa,dc=org

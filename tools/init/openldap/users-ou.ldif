@@ -1,0 +1,9 @@
+dn: ou=people,dc=jwqa,dc=org
+objectClass: organizationalUnit
+objectClass: top
+ou: people
+
+dn: ou=groups,dc=jwqa,dc=org
+objectClass: organizationalUnit
+objectClass: top
+ou: groups

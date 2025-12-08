@@ -1,0 +1,5 @@
+dn: cn=cloudtesters,ou=groups,dc=jwqa,dc=org
+objectClass: posixGroup
+cn: cloudtesters
+gidNumber: 100030
+memberUid: usera

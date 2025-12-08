@@ -205,7 +205,7 @@ export $var=\"${!var}\""
 done
 
 
-extra_pkg="screen git vim less curl wget certbot python3-certbot-apache apache2"
+extra_pkg="screen git vim less curl wget certbot python3-certbot-apache apache2 xtail"
 
 noclutter() { grep -E -v "^(Preparing to|Get:|Selecting previously unselected|Setting up|Creating config|Created symlink|Processing triggers|)"; }
 
@@ -266,6 +266,11 @@ ssh root@$IPADDR certbot $certbot_opts || {
 echo "$env_sh" | ssh root@$IPADDR "cat > env.sh"
 ssh root@$IPADDR "echo 'source env.sh' >> .bashrc"
 scp $script root@$IPADDR:INIT.bashrc
+asset_dir="$(echo $script | sed -e 's/\.sh//')"
+if [ -d "$asset_dir" ];
+  ssh root@$IPADDR "mkdir init"
+  scp -a $asset_dir root@$IPADDR:init
+fi
 ssh -t root@$IPADDR screen -m "bash -c 'source INIT.bashrc; exec bash'"
 
 echo ""
