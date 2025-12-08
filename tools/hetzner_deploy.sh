@@ -28,7 +28,9 @@ Usage:
 	hcloud image list  -a x86 | grep '\(debian\|ubuntu\)'	# study available images
 
 	# eventually...
-	hcloud server delete SERVER_NAME
+	hcloud server list
+	hcloud server create-image --type snapshot SERVER_NAME --description "SERVERNAME-DATE"
+	hcloud server delete SERVER_NAME; hetzner_dns del SERVER_NAME
 EOF
   exit 0
 fi
@@ -269,4 +271,3 @@ ssh -t root@$IPADDR screen -m "bash -c 'source INIT.bashrc; exec bash'"
 echo ""
 echo "Hint: When you no longer need this server, you can remove it with:"
 echo "	hcloud server delete $name"
-
