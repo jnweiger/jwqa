@@ -236,40 +236,52 @@ ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; sys
 
 # infuse all dns names into the default-ssl.conf so that certbot does not ask questions.
 ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerAlias $(echo $FQDNS)'" /etc/apache2/sites-available/default-ssl.conf
-ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $(echo "$FQDNS" | head -n1)'" /etc/apache2/sites-available/default-ssl.conf
+ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $DNS_NAME'" /etc/apache2/sites-available/default-ssl.conf
 
+le_backup="le-backup-$(echo "$DNS_NAME" | tr . -).tar.gz"
+if [ -z "$(find . -maxdepth 1 -type f -name "$le_backup" -mtime -2)" ]; then
+   # we need a fresh certificate
 
-## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf alread exists.
-## prepare renewal config, so that certbot won't ask questions.
-## The name of the config derives from the first domain. That is what certbot does, we do that too.
-# cat <<EOF | ssh root@$IPADDR "cat > '/etc/letsencrypt/renewal/$(echo "$FQDNS" | head -n 1).conf'"
-# [renewalparams]
-# installer = apache
-# apache_vhost_config = /etc/apache2/sites-available/default-ssl.conf
-# EOF
+   ## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf alread exists.
+   ## prepare renewal config, so that certbot won't ask questions.
+   ## The name of the config derives from the first domain. That is what certbot does, we do that too.
+   # cat <<EOF | ssh root@$IPADDR "cat > '/etc/letsencrypt/renewal/$DNS_NAME.conf'"
+   # [renewalparams]
+   # installer = apache
+   # apache_vhost_config = /etc/apache2/sites-available/default-ssl.conf
+   # EOF
 
-# install a letsencrypt certificate (with retry, DNS may not yet be ready...)
-# TODO: this install only works partially, when we have multiple domains in d_opts.
-d_opts="$(echo \ $FQDNS | sed -e 's/\s\b/ -d /g')"
-certbot_opts="--non-interactive -m qa@jwqa.de --no-eff-email --agree-tos --redirect --apache $d_opts"
-echo "+ certbot $certbot_opts"
-ssh root@$IPADDR certbot $certbot_opts || {
-  echo "Oh, certbot failed?, let's wait 30sec and try again"
-  sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5
-  ssh root@$IPADDR certbot $certbot_opts || {
-    echo "Oh, certbot failed again?, let's try with certonly, without installing into apache"
-    ssh root@$IPADDR certbot certonly $certbot_opts
-  }
-}
+   # install a letsencrypt certificate (with retry, DNS may not yet be ready...)
+   # TODO: this install only works partially, when we have multiple domains in d_opts.
+   d_opts="$(echo \ $FQDNS | sed -e 's/\s\b/ -d /g')"
+   certbot_opts="--non-interactive -m qa@jwqa.de --no-eff-email --agree-tos --redirect --apache $d_opts"
+   echo "+ certbot $certbot_opts"
+   ssh root@$IPADDR certbot $certbot_opts || {
+     echo "Oh, certbot failed?, let's wait 30sec and try again"
+     sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5
+     ssh root@$IPADDR certbot $certbot_opts || {
+       echo "Oh, certbot failed again?, let's try with certonly, without installing into apache"
+       ssh root@$IPADDR certbot certonly $certbot_opts
+     }
+   }
+
+   # save the certificate for re-use...
+   ssh root@$IPADDR tar zcf - /etc/letsencrypt > $le_backup
+else
+   # we have a saved certificate for this name that we want to use.
+   echo "Restoring cert from $le_backup ..."
+   ssh root@$IPADDR tar zxf - -C / < $le_backup
+   ssh root@$IPADDR "certbot certificates; certbot --apache install --cert-name $DNS_NAME; systemctl reload apache2"
+fi
 
 # transfer and run the intialization script on the target host.
 echo "$env_sh" | ssh root@$IPADDR "cat > env.sh"
 ssh root@$IPADDR "echo 'source env.sh' >> .bashrc"
 scp $script root@$IPADDR:INIT.bashrc
 asset_dir="$(echo $script | sed -e 's/\.sh//')"
-if [ -d "$asset_dir" ];
+if [ -d "$asset_dir" ]; then
   ssh root@$IPADDR "mkdir init"
-  scp -a $asset_dir root@$IPADDR:init
+  scp -r $asset_dir root@$IPADDR:init
 fi
 ssh -t root@$IPADDR screen -m "bash -c 'source INIT.bashrc; exec bash'"
 

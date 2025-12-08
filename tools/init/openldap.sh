@@ -3,6 +3,7 @@
 # DNS_NAME:     ldap
 # HCLOUD_TYPE:  cpx11		# cpx11 2GB, cpx21 4GB, cpx41 8G
 # ENV_VARS_OPT: INIT_ADMIN_PASS
+# OPEN_PORTS:	80,22,443,3389,6636,6443	# ldapport, ldapsport, phpadmin
 #
 # Study
 #  - https://betterprogramming.pub/ldap-docker-image-with-populated-users-3a5b4d090aa4
@@ -12,8 +13,10 @@ source env.sh	# not really needed here.
 
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
-apt install -y screen podman-docker xtail
+apt install -y screen podman-docker xtail jq ldap-utils
 
+openldap_docker_image=docker.io/osixia/openldap
+phpadmin_docker_image=docker.io/osixia/phpldapadmin
 admin_pass="$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8)"
 test -n "$INIT_ADMIN_PASS" && export admin_pass="$INIT_ADMIN_PASS"
 echo "export admin_pass=$admin_pass" >> env.sh
@@ -428,31 +431,31 @@ opts="-v $mount $ports --env LDAP_CONFIG_PASSWORD=$admin_pass --env LDAP_ADMIN_P
 docker container inspect -f 'openldap is already running' openldap 2> /dev/null && {
   echo " - to reload try:"
   echo "    docker kill openldap; docker rm openldap"
-  echo "    docker run -d --rm --name openldap $opts osixia/openldap --copy-service --loglevel debug"
+  echo "    docker run -d --rm --name openldap $opts $openldap_docker_image --copy-service --loglevel debug"
   exit 0
 }
 
 
-docker run --rm --name openldap $opts --detach osixia/openldap --copy-service --loglevel debug
+docker run --rm --name openldap $opts --detach $openldap_docker_image --copy-service --loglevel debug
 sleep 5
 ldapserver=$(docker inspect openldap | jq '.[0].NetworkSettings.IPAddress' -r)
 
-if [ "$ldapserver" == "null" ]; then
+if [ "$ldapserver" == "" -o "$ldapserver" == "null" ]; then
   echo "ERROR: failed to start openldap, retrying without --rm and --detach for better diagnostics."
   sleep 2
   set -x
-  docker run --name openldap $opts osixia/openldap --copy-service --loglevel debug
+  docker run --name openldap $opts $openldap_docker_image --copy-service --loglevel debug
   set +x
   sleep 2
   echo ""
   echo "ERROR: failed to start openldap ... when done inspecting the issue, please clean up with: docker rm openldap"
-  echo "retry: docker run --rm --name openldap $opts osixia/openldap --copy-service --loglevel debug"
+  echo "retry: docker run --rm --name openldap $opts $openldap_docker_image --copy-service --loglevel debug"
   exit 0
 fi
 
 ldapsearch -x -H ldap://$ldapserver -b dc=jwqa,dc=org -D "$admin_dn" -w "$admin_pass" -v
 
-docker run --rm -p 6443:443 --name phpldapadmin-server --env PHPLDAPADMIN_LDAP_HOSTS=$ldapserver --detach osixia/phpldapadmin
+docker run --rm -p 6443:443 --name phpldapadmin-server --env PHPLDAPADMIN_LDAP_HOSTS=$ldapserver --detach $phpadmin_docker_image
 
 cat << EOF6
 -----------------------------------------------
@@ -465,14 +468,14 @@ EOF6
 cat << EOF7
 -----------------------------------------------
 
- ldapsearch -x -H ldap://$ldapserver -D $admin_dn -w $admin_pass -b dc=jwqa,dc=org '(uid=lemming012)'
+ ldapsearch -x -H ldap://$DNS_NAME:$ldapport -D $admin_dn -w $admin_pass -b dc=jwqa,dc=org '(uid=lemming012)'
 
    uidNumber: 2012
    gidNumber: 30000
    homeDirectory: /home/lemming012
    color: blue
 
- ldapsearch -x -H ldap://$ldapserver -D $admin_dn -w $admin_pass -b ou=groups,dc=jwqa,dc=org '(objectClass=*)' dn uniqueMember
+ ldapsearch -x -H ldaps://$DNS_NAME:$ldapsport -D $admin_dn -w $admin_pass -b ou=groups,dc=jwqa,dc=org '(objectClass=*)' dn uniqueMember
 
    # sailors, groups, jwqa.org
    dn: cn=sailors,ou=groups,dc=jwqa,dc=org
@@ -490,9 +493,8 @@ Extend the LDAP Schema
  - Then ldapadmin should allow the new attributes for 'Add new attribute'
  - to update an existing Schema, (FIXME: ldapmodify always fails. Must docker kill and restart...)
     - Edit the file to include the line 'changetype: modify' as the second line.
-    - Run
+    - Try run locally:
 	ldapmodify -H ldap://$ldapserver -D "$admin_dn" -w "$admin_pass" -v -f ldif/40_jwextra_schema.ldif
-      still fails to update... No such object, Insufficient access, or similar.
 EOF7
 
 
@@ -512,4 +514,5 @@ EOF7
 #
 # # show the config
 # docker exec openldap ldapsearch -H ldapi:/// -Y EXTERNAL -b "cn=config"
+
 
