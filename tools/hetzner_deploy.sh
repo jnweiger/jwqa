@@ -283,7 +283,7 @@ if [ -d "$asset_dir" ]; then
   ssh root@$IPADDR "mkdir init"
   scp -r $asset_dir root@$IPADDR:init
 fi
-ssh -t root@$IPADDR screen -m "bash -c 'source INIT.bashrc; exec bash'"
+ssh -t root@$IPADDR screen -L -m "bash -c 'source INIT.bashrc; exec bash'"
 
 echo ""
 echo "Hint: When you no longer need this server, you can remove it with:"
