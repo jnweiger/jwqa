@@ -1,0 +1,35 @@
+# This is a schema extension.
+# We add private attributes to objectclass jwextra. the class is loaded at startup already,
+# because I have not found a way to load it with ldapadd during runtime. I always get permission denied.
+#
+# To use these attributes
+# - run ldapadd to load the file
+# - create a new object and add jwextra to its list of objectclasses.
+#
+# 1.3.6.1.4.1.39430	is the owncloud OID schema prefix.
+#  - we use 1.1.10, 1.1.11, 1.1.12, ... for attributes
+#  - and 1.3.2 for the class name
+dn: cn=checkmkUser,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: checkmkUser
+olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.20 NAME 'cmkUser' DESC 'A generic user name attribute for checkmk.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.4 NAME 'checkmkUser' DESC 'checkmkUser LDAP Schema' AUXILIARY MAY ( cmkUser ) )
+
+dn: cn=checkmkAdmin,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: checkmkAdmin
+olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.21 NAME 'cmkAdmin' DESC 'An admin user attribute for checkmk.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.5 NAME 'checkmkAdmin' DESC 'checkmkAdmin LDAP Schema' AUXILIARY MAY ( cmkAdmin ) )
+
+dn: cn=checkmkGuest,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: checkmkGuest
+olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.22 NAME 'cmkGuest' DESC 'A guest user attribute for checkmk.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.6 NAME 'checkmkGuest' DESC 'checkmkGuest LDAP Schema' AUXILIARY MAY ( cmkGuest ) )
+
+dn: cn=checkmkTest,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: checkmkTest
+olcAttributeTypes: ( 1.3.6.1.4.1.39430.1.1.23 NAME 'cmkTest' DESC 'A test user attribute for checkmk.' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcObjectClasses: ( 1.3.6.1.4.1.39430.1.3.7 NAME 'checkmkTest' DESC 'checkmkTest LDAP Schema' AUXILIARY MAY ( cmkTest ) )
+
