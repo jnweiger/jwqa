@@ -24,6 +24,8 @@
 
 set -e
 
+oc_version_default=4.0.2
+
 if [ -z "$1" -o "$1" = "-h" -o "$1" = "--help" ]; then
   cat <<EOF
 
@@ -39,7 +41,7 @@ Environment variables used:
                                 # Location of the files fullchain.pem and privkey.pem
                                 # /live/ or /live/DNSNAME are appended if the folders exists.
                                 # Default: /etc/letsencrypt
-  export OC_VERSION=3.0.0	# Default: 3.4.0, see https://docs.opencloud.eu/docs/admin/resources/lifecycle
+  export OC_VERSION=5.0.1	# Default: $oc_version_default, see https://docs.opencloud.eu/docs/admin/resources/lifecycle
 
 Simple example:
   $0 oc.jwqa.de    # from within a newly started machine with DNS name oc.jwqa.de
@@ -48,7 +50,9 @@ Detailled example:
   https://console.hetzner.cloud -> click PROJECTNAME -> Server -> Add Server
   https://dns.hetzner.com -> click ZONENAME -> Add record -> Name oc.jwqa.de
   scp ./ocinstall_bare.sh oc.jwqa.de:
-  ssh root@oc.jwqa.de bash ./ocinstall_bare.sh oc.jwqa.de
+  ## If we want to start with a fresh install from scratch, after using an older version for a while:
+  # ssh root@oc.jwqa.de mv oc-run oc-run-attic-400rc2
+  ssh root@oc.jwqa.de OC_VERSION=4.0.2 bash ./ocinstall_bare.sh oc.jwqa.de
 
 EOF
   exit 1
@@ -86,7 +90,7 @@ fi
 # do not proceed if that address is already in use. opencloud needs this and many more local port numbers.
 
 export OC_HOST="$dnsname"
-test -z "$OC_VERSION"  && export OC_VERSION=3.4.0
+test -z "$OC_VERSION"  && export OC_VERSION=$oc_version_default
 test -z "$OC_BASE_DIR" && export OC_BASE_DIR=$HOME/oc-run/$dnsname
 mkdir -p "$OC_BASE_DIR"		# make sure the directory exists.
 
@@ -169,6 +173,8 @@ logdir=\$SCRIPT_DIR/$sandboxdir/log
 mkdir -p "\$logdir"
 export OC_LOG_FILE="\$logdir/opencloud.log"
 test -f "\$OC_LOG_FILE" && mv "\$OC_LOG_FILE" "\$OC_LOG_FILE.\$(date +%Y%m%d)"
+
+test -e \$SCRIPT_DIR/env.sh && source \$SCRIPT_DIR/env.sh
 
 \$SCRIPT_DIR/$sandboxdir/runopencloud.sh &
 EOF
