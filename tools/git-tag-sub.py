@@ -22,7 +22,7 @@
 import sys, os, argparse, subprocess
 from pathlib import Path
 
-__VERSION__ = '0.1'
+__VERSION__ = '0.2'
 verbose = False
 
 
@@ -126,12 +126,16 @@ def main():
         sys.exit(1)
     
     if not tags:
-        print("ERROR: not tags found at the current commit (HEAD).\n\t Please specify one on the command line, or manually add one before retrying.\n\t If you want to move an existing tag, specify it on the command line with --force")
+        print("ERROR: No tags found at the current commit (HEAD).\n\t Please specify one on the command line, or manually add one before retrying.\n\t If you want to move an existing tag, specify it on the command line with --force")
         sys.exit(1)
         
     for tag in tags:
         stag = args.tag_name_fmt % tag
-        print("TODO: push", stag, "into sublmodules")
+        git("submodule", "--quiet", "foreach", "--recursive", "git", "tag", "--force", stag)
+        git_push_tags = [ "submodule", "--quiet", "foreach", "--recursive", "git", "push", "--tags" ]
+        if args.force:
+            git_push_tags.append("--force")
+        git(git_push_tags)
         
 
 
