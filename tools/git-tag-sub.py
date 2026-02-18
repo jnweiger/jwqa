@@ -26,16 +26,21 @@ __VERSION__ = '0.2'
 verbose = False
 
 
-def git(*args):
+def git(*args, no_op=False):
     """Run a git command and return its stdout stripped."""
     if type(args) == type(()) and type(args[0]) == type([]):
         # accept mutiple strings or a single list.
         args = args[0]
 
     if verbose:
+        if no_op:
+            print("# ", eol='')
         print("+ git " + ' '.join(args))
 
-    result = subprocess.run(["git"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+    if no_op:
+        return ''
+
+    result = subprocess.run(["git"] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=False)
     if result.returncode != 0:
         sys.stderr.write(f"ERROR: git {' '.join(args)} failed:\n{result.stderr}\n")
         sys.exit(1)
@@ -84,7 +89,10 @@ def sanity_check():
 def main():
     global verbose
 
-    repo_name = git_repo_name()
+    try:
+        repo_name = git_repo_name()
+    except:
+        repo_name = 'REPO'
 
     parser = argparse.ArgumentParser(allow_abbrev=False, epilog="version: "+__VERSION__, description="Propagate git tags into submodules.")
     parser.def_fmt = repo_name + "/%s"
@@ -93,8 +101,9 @@ def main():
     parser.add_argument("--quiet", "-q", action="store_true", help="Print git commands.")
     parser.add_argument("--unclean", "--continue", "-c", action="store_true", help="Continue if the checkout copy has uncommited changes.")
     parser.add_argument("--force", action="store_true", help="Use force push, when pushing tags. This is needed relocate an existing tag to new commit (HEAD).")
-    parser.add_argument("--check-only", "--no-op", action="store_true", help="Just do sanity checks. No tags are propagated into submodules.")
-    parser.add_argument("--tag-name-fmt", metavar="FMT", help="Custom format string containing a single %%s placeholder. Default (derived from the current repo): "+parser.def_fmt.replace('%', '%%'), default=parser.def_fmt)
+    parser.add_argument("--check-only", action="store_true", help="Just do sanity checks. No tags are propagated into submodules.")
+    parser.add_argument("--no-op", action="store_true", help="Run without making any changes. Just print out the git commands that would have been executed.")
+    parser.add_argument("--tag-name-fmt", metavar="FMT", help="Custom format string containing a single %%s placeholder. Default (derived from the current repo): '"+parser.def_fmt.replace('%', '%%') + "'", default=parser.def_fmt)
     parser.add_argument("tag", metavar="TAG", nargs="?", help="New tag to add and push everywhere. Default: look up and propagate existing tag(s) from current commit (HEAD).")
     args = parser.parse_args()
     if args.no_prefix: args.tag_name_fmt = '%s'
@@ -111,11 +120,11 @@ def main():
         if len(git("diff-index", "--numstat", "HEAD")) and not args.unclean:
             print("\nERROR: you have uncommited changes.\n\t Specify option --unclean to continue (or commit your changes).")
             sys.exit(1)
-        git("tag", "--force", args.tag)
+        git("tag", "--force", args.tag, no_op=args.no_op)
         git_push_tags = [ "push", "--tags" ]
         if args.force:
             git_push_tags.append("--force")
-        git(git_push_tags)
+        git(git_push_tags, no_op=args.no_op)
         tags.append(args.tag)
     else:
         r = git("tag", "--points-at", "HEAD")
@@ -131,11 +140,11 @@ def main():
         
     for tag in tags:
         stag = args.tag_name_fmt % tag
-        git("submodule", "--quiet", "foreach", "--recursive", "git", "tag", "--force", stag)
+        git("submodule", "--quiet", "foreach", "--recursive", "git", "tag", "--force", stag, no_op=args.no_op)
         git_push_tags = [ "submodule", "--quiet", "foreach", "--recursive", "git", "push", "--tags" ]
         if args.force:
             git_push_tags.append("--force")
-        git(git_push_tags)
+        git(git_push_tags, no_op=args.no_op)
         
 
 
