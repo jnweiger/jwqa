@@ -1,23 +1,34 @@
 #! /usr/bin/python3
 #
 # find all tags at the current commit of this repo.
-# per default prefix the name of the current repo with / to the tag to generate the tag name for submodules
-# if --no-prefix or --same is given, then tag-name-fmt is set to '%s'. --tag-name-fmt defaults to 'reponame/%s'
+# Per default append the name of the current repo with @ to the tag to generate the tag name for submodules
+# If --same is given, then tag-name-fmt is set to '{tag}'. --tag-name-fmt defaults to '{tag}@{repo}'
 # where reponame is derived from the current toplevel repo.
-# iterate through all submodules with foreach, push the tag after applyig the format
-# warn for each git repo, if there are uncommited changes. (unless --unclean option is specified)
+# Iterate through submodules, push the tag after applyig a format.
+# Warn for each git repo, if there are uncommited changes. (unless --unclean option is specified)
 #
-# we definitly error out, when there is a dirty submodule. when git diff shows you something like
+# (C) 2026 j.weigert@heinlein-support.de - distribute under GPLv2
+#
+# v0.1 20260217,    added some code to actually push tags into submodules
+# v0.2 20260218,    properly implement --no-op
+# v0.3 20260218,    submodule tagging wirks with sanitycheck, and filtered module list is fully supported.
+# v0.4 20260219,    added GIT_TAG_SUB_FMT env var and {repo_md5}
+# v0.5 20260220,    added short options, removed --check-only, which is obsoleted by --no-op.
+#                   Add more early exits, consistently exit nonzero when in trouble.
+
+# Oops, we definitly have to error out, when there is a dirty submodule. git diff then shows you something like
 # --- a/src/test-sub2mod
 # +++ b/src/test-sub2mod
 # @@ -1 +1 @@
 # -Subproject commit 012a120db7d601347271da4b9148e925c240d6d3
 # +Subproject commit 012a120db7d601347271da4b9148e925c240d6d3-dirty
 #
-# then you have to "git add src/test-sub2mod; git commit" to get things in sync.
-# there is a built in sanity check, that will always complain about the above.
-# With --check-only we do the up front sanity checks, wihtout propagating any tags.
+# Then you have to "git add src/test-sub2mod; git commit" to get things in sync.
+# There is a built in sanity check, that will always complain about the above.
 #
+# TODO: sanity_check() and --unclean are currently all or nothing.
+#       Can we e.g. accept uncommited code changes in the main repo? Tags operate on commited code anyway.
+
 # Requires:
 #   - python 3.5 or later,
 #   - git
@@ -28,7 +39,7 @@ import sys, os, argparse, subprocess, hashlib
 from pathlib import Path
 import fnmatch
 
-__VERSION__ = '0.4'
+__VERSION__ = '0.5'
 verbose = False
 
 
@@ -121,14 +132,13 @@ def main():
     parser.def_fmt = os.getenv("GIT_TAG_SUB_FMT", "{tag}@{repo}")
     parser.def_mod = '*'
 
-    parser.add_argument("--sametag", "--same", action="store_true", help="Do not modify the tag, when applying to submodules. Same as --tag-name-fmt='{tag}'.")
+    parser.add_argument("--sametag", "--same", "-s", action="store_true", help="Do not modify the tag, when applying to submodules. Same as --tag-name-fmt='{tag}'.")
     parser.add_argument("--quiet", "-q", action="store_true", help="Print git commands.")
     parser.add_argument("--unclean", "--continue", "-c", action="store_true", help="Continue if the checkout copy has uncommited changes.")
-    parser.add_argument("--force", action="store_true", help="Use force push, when pushing tags. This is needed relocate an existing tag to new commit (HEAD).")
-    parser.add_argument("--check-only", action="store_true", help="Just do sanity checks. No tags are propagated into submodules.")
-    parser.add_argument("--no-op", '--noop', action="store_true", help="Run without making any changes. Just print out the git commands that would have been executed.")
-    parser.add_argument("--tag-name-fmt", metavar="FMT", help="Custom format string that may contain {repo}, {repo_md5}, {tag} placeholders. Default env variable GIT_TAG_SUB_FMT or '"+parser.def_fmt.replace('%', '%%') + "'", default=parser.def_fmt)
-    parser.add_argument("--modules", metavar="MODPAT", help="Limit to the listed submodules. The list is comma-seperated and supports glob patterns. Default: all aka '"+parser.def_mod.replace('%', '%%') + "'", default=parser.def_mod)
+    parser.add_argument("--force", "-f", action="store_true", help="Use force push, when pushing tags. This is needed relocate an existing tag to new commit (HEAD).")
+    parser.add_argument("--no-op", "--noop", "-n", action="store_true", help="Run without making any changes. Just print out the git commands that would have been executed.")
+    parser.add_argument("--tag-name-fmt", "-t", metavar="FMT", help="Custom format string that may contain {repo}, {repo_md5}, {tag} placeholders. Default env variable GIT_TAG_SUB_FMT or '"+parser.def_fmt.replace('%', '%%') + "'", default=parser.def_fmt)
+    parser.add_argument("--modules", "-m", metavar="MODPAT", help="Limit to the listed submodules. The list is comma-seperated and supports glob patterns. Default: all aka '"+parser.def_mod.replace('%', '%%') + "'", default=parser.def_mod)
     parser.add_argument("tag", metavar="TAG", nargs="?", help="New tag to add and push everywhere. Default: look up and propagate existing tag(s) from current commit (HEAD).")
     args = parser.parse_args()
     if args.sametag: args.tag_name_fmt = '{tag}'
@@ -141,20 +151,25 @@ def main():
         # assert that topdir has a trailing slash
         topdir = topdir + '/'
     submodules = git("submodule", "--quiet", "foreach", "--recursive", "pwd -P")    # oops, "$sm_path" is unreliable with --recursive
+    if not submodules:
+        print("ERROR: There are no submodules here.\n\t Maybe try changing to a parent repository?")
+        sys.exit(1)
     submodules = glob_filter(submodules.splitlines(), args.modules.split(','))
+    if not submodules:
+        print("ERROR: Filtering with --modules matched nothing.\n\t Please check your glob patterns.")
+        sys.exit(1)
+
     if not all(p.startswith(topdir) for p in submodules):
         raise ValueError("ERROR: assertion failed: submodules must be within topdir="+topdir+": "+str(submodules))
     submodules = [mod[len(topdir):] for mod in submodules]
     os.chdir(topdir)
 
-    r = sanity_check(submodules)
-    if args.check_only:
-        sys.exit(r)
-    if r:
+    check_result = sanity_check(submodules)
+    if check_result:
         if args.unclean:
             print("WARN: continuing unclean..")
         else:
-            sys.exit(r)
+            sys.exit(check_result)
     else:
         if verbose:
             print("Everything is clean, good ...\n")
@@ -193,6 +208,8 @@ def main():
             if args.force:
                 git_push_tags.append("--force")
             git(git_push_tags, chdir=mod, no_op=args.no_op)
+
+    sys.exit(check_result)
 
 
 if __name__ == "__main__":
