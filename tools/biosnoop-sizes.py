@@ -38,13 +38,13 @@ for raw in sys.stdin:
         print("parse error: input did not look like it was from iovisor/tools/biosnoop.py: R/W column not found")
         print(line)
         sys.exit(1)
-    
+
     now = time.time()
     queue.append([now, line[i], bucket(int(line[i+2]))])
     while len(queue) and queue[0][0] < now - time_window:
         queue.popleft()
         print('x')
-    
+ 
     if printed_tstamp + update_interval < now:
         printed_tstamp = now
         print("printing")
