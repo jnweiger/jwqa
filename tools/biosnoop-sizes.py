@@ -15,6 +15,17 @@ def bucket(n):
             return i
     return len(bucket_sizes)
 
+def print_stats(q):
+    # for all buckets, increment
+    r_counters = [0] * len(bucket_names)
+    w_counters = [0] * len(bucket_names)
+    for i in q:
+        if i[1] == 'R':
+            r_counters[i[2]] += 1
+        else:
+            w_counters[i[2]] += 1
+    print(r_counters, w_counters)
+
 
 printed_tstamp = 0.0
 update_interval = 1.0   # seconds
@@ -43,10 +54,10 @@ for raw in sys.stdin:
     queue.append([now, line[i], bucket(int(line[i+2]))])
     while len(queue) and queue[0][0] < now - time_window:
         queue.popleft()
-        print('x')
+        # print('x')
  
     if printed_tstamp + update_interval < now:
         printed_tstamp = now
-        print("printing")
+        print_stats(queue)
 
     time.sleep(0.1)
