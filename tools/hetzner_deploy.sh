@@ -243,6 +243,10 @@ fi
 # enable apache ssl, so that certbot can install a cert
 ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; systemctl restart apache2'"
 
+# just get something up and running. good for debugging apache chaos.
+print "FIXME: EARLY EXIT without patching apache config"
+exit 0
+
 # infuse all dns names into the default-ssl.conf so that certbot does not ask questions.
 ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerAlias $(echo $FQDNS)'" /etc/apache2/sites-available/default-ssl.conf
 ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $DNS_NAME'" /etc/apache2/sites-available/default-ssl.conf
