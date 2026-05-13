@@ -4,6 +4,8 @@
 #	export HCLOUD_TOKEN=...
 #	export HCLOUD_DNS_ZONE=jwqa.de	# or defaults to finding the zone by suffix match of the fqdn name.
 #       know th eavailable types from hcloud server-type list
+#
+# CAUTION: must block port UDP 111	apt purge rpcbind; systemctl disable --now rpcbind.service
 
 verbose=true	# true,false
 
@@ -242,6 +244,10 @@ fi
 
 # enable apache ssl, so that certbot can install a cert
 ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; systemctl restart apache2'"
+
+# keep public port 111 closed.
+ssh -t root@$IPADDR bash -x -c "'systemctl disable --now rpcbind.service'"	# just to be safe.
+ssh -t root@$IPADDR bash -x -c "'for proto in udp tcp; do iptables -A INPUT -p \$proto --dport 111 -j DROP; done'"
 
 # just get something up and running. good for debugging apache chaos.
 print "FIXME: EARLY EXIT without patching apache config"

@@ -24,7 +24,7 @@
 
 set -e
 
-oc_version_default=4.0.2
+oc_version_default=6.2.0
 
 if [ -z "$1" -o "$1" = "-h" -o "$1" = "--help" ]; then
   cat <<EOF
