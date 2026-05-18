@@ -9,9 +9,10 @@
 
 verbose=true	# true,false
 
-default_hcloud_image=ubuntu-24.04
-default_hcloud_type=cpx22			# no longer available: cpx11, cpx21
-default_hcloud_location=			# '' default empty, to let hetzner choose, nbg1, hel1, ...
+default_hcloud_image=ubuntu-26.04
+default_hcloud_type=cx23			# no longer available: cpx11, cpx21
+default_hcloud_location=hel1			# '' default empty, to let hetzner choose, nbg1, hel1, ...
+default_autostart_certbot=true			# set to false, to suppress default instalation of apache and certbot
 
 if [ -z "$1" -o "$1" == "--help" -o "$1" == "-h" ]; then
   cat <<EOF 1>&2
@@ -23,6 +24,7 @@ Usage:
 	export DNS_NAME=...[-DATE]		# default: from script # DNS_NAME: ...
 	export HCLOUD_TYPE=...			# default: from script # HCLOUD_TYPE: ... or '$default_hcloud_type'
 	export HCLOUD_IMAGE=...			# default: from script # HCLOUD_IMAGE: ... or '$default_hcloud_image'
+	export AUTOSTART_CERTBOT=false		# default: from script # AUTOSTART_CERTBOT: ... or '$default_autostart_certbot'
 	export HCLOUD_LOCATION=...		# default: '$default_hcloud_location'
 	export INIT_...				# all env variables starting with INIT_ are passed into env.sh
 
@@ -110,16 +112,19 @@ fi
 
 $verbose && echo "using $(readlink -f $script)"
 
-# extract some variables
-test -z "$HCLOUD_IMAGE" && HCLOUD_IMAGE="$(sed -ne "s@^#\s*HCLOUD_IMAGE:\s*@@p" $script | sed -e 's@\s.*$@@')"
-test -z "$HCLOUD_TYPE"  && HCLOUD_TYPE="$( sed -ne "s@^#\s*HCLOUD_TYPE:\s*@@p"  $script | sed -e 's@\s.*$@@')"
-test -z "$DNS_NAMES"    && DNS_NAMES="$(   sed -ne "s@^#\s*DNS_NAME:\s*@@p" -e 's@\s.*$@@' $script)"
-ENV_VARS_OPT="$(                           sed -ne "s@^#\s*ENV_VARS_OPT:\s*@@p" -e 's@\s*#.*$@@' $script)"
+# extract some variables from the init script
+test -z "$HCLOUD_TYPE"  	&& HCLOUD_TYPE="$(      sed -ne "s@^#\s*HCLOUD_TYPE:\s*@@p"       -e 's@\s.*$@@' $script)"
+test -z "$HCLOUD_IMAGE" 	&& HCLOUD_IMAGE="$(     sed -ne "s@^#\s*HCLOUD_IMAGE:\s*@@p"      -e 's@\s.*$@@' $script)"
+test -z "$HCLOUD_LOCATION" 	&& HCLOUD_LOCATION="$(  sed -ne "s@^#\s*HCLOUD_LOCATION:\s*@@p"   -e 's@\s.*$@@' $script)"
+test -z "$DNS_NAMES"    	&& DNS_NAMES="$(        sed -ne "s@^#\s*DNS_NAME:\s*@@p"          -e 's@\s.*$@@' $script)"
+test -z "$AUTOSTART_CERTBOT"    && AUTOSTART_CERTBOT="$(sed -ne "s@^#\s*AUTOSTART_CERTBOT:\s*@@p" -e 's@\s.*$@@' $script)"
+test -z "$ENV_VARS_OPT"         && ENV_VARS_OPT="$(     sed -ne "s@^#\s*ENV_VARS_OPT:\s*@@p"      -e 's@\s.*$@@' $script)"
 
-test -z "$HCLOUD_TYPE"     && HCLOUD_TYPE=$default_hcloud_type
-test -z "$HCLOUD_IMAGE"    && HCLOUD_IMAGE=$default_hcloud_image
-test -z "$HCLOUD_LOCATION" && HCLOUD_LOCATION=$default_hcloud_location
-test -z "$DNS_NAMES" && DNS_NAMES=$(echo "$HCLOUD_IMAGE-DATE" | tr '._' '-')
+test -z "$HCLOUD_TYPE"    	&& HCLOUD_TYPE=$default_hcloud_type
+test -z "$HCLOUD_IMAGE"   	&& HCLOUD_IMAGE=$default_hcloud_image
+test -z "$HCLOUD_LOCATION" 	&& HCLOUD_LOCATION=$default_hcloud_location
+test -z "$AUTOSTART_CERTBOT"	&& AUTOSTART_CERTBOT=$default_autostart_certbot
+test -z "$DNS_NAMES" 		&& DNS_NAMES=$(echo "$HCLOUD_IMAGE-DATE" | tr '._' '-')
 DNS_NAMES="$(echo "$DNS_NAMES" | sed -e "s@DATE@$(date +%Y%m%d)@")"
 set_name_and_check_zone "$(echo "$DNS_NAMES" | head -n1)"		# first element, if its a list.
 
@@ -198,6 +203,7 @@ export NAME=$name
 export FQDNS="$FQDNS"
 export DNS_NAME=$DNS_NAME
 export HCLOUD_DNS_ZONE=$HCLOUD_DNS_ZONE
+export AUTOSTART_CERTBOT=$AUTOSTART_CERTBOT
 export HCLOUD_IMAGE=$HCLOUD_IMAGE
 export HCLOUD_TYPE=$HCLOUD_TYPE
 export HCLOUD_DATACENTER=$HCLOUD_DATACENTER
@@ -216,7 +222,10 @@ export $var=\"${!var}\""
 done
 
 
-extra_pkg="screen git vim less curl wget certbot python3-certbot-apache apache2 xtail"
+extra_pkg="screen git vim less curl wget xtail ca-certificates transport-https"
+if [ "$AUTOSTART_CERTBOT" == true ]; then
+    extra_pkg="$extra_pkg certbot python3-certbot-apache apache2"
+fi
 
 noclutter() { grep -E -v "^(Preparing to|Get:|Selecting previously unselected|Setting up|Creating config|Created symlink|Processing triggers|)"; }
 
@@ -242,55 +251,57 @@ END
   esac
 fi
 
-# enable apache ssl, so that certbot can install a cert
-ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; systemctl restart apache2'"
-
 # keep public port 111 closed.
 ssh -t root@$IPADDR bash -x -c "'systemctl disable --now rpcbind.service'"	# just to be safe.
 ssh -t root@$IPADDR bash -x -c "'for proto in udp tcp; do iptables -A INPUT -p \$proto --dport 111 -j DROP; done'"
 
-# just get something up and running. good for debugging apache chaos.
-print "FIXME: EARLY EXIT without patching apache config"
-exit 0
+if [ "$AUTOSTART_CERTBOT" == true ]; then
+    # enable apache ssl, so that certbot can install a cert
+    ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; systemctl restart apache2'"
 
-# infuse all dns names into the default-ssl.conf so that certbot does not ask questions.
-ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerAlias $(echo $FQDNS)'" /etc/apache2/sites-available/default-ssl.conf
-ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $DNS_NAME'" /etc/apache2/sites-available/default-ssl.conf
+    # just get something up and running. good for debugging apache chaos.
+    print "FIXME: EARLY EXIT without patching apache config"
+    exit 0
 
-le_backup="le-backup-$(echo "$DNS_NAME" | tr . -).tar.gz"
-if [ -z "$(find . -maxdepth 1 -type f -name "$le_backup" -mtime -2)" ]; then
-   # we need a fresh certificate
+    # infuse all dns names into the default-ssl.conf so that certbot does not ask questions.
+    ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerAlias $(echo $FQDNS)'" /etc/apache2/sites-available/default-ssl.conf
+    ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $DNS_NAME'" /etc/apache2/sites-available/default-ssl.conf
 
-   ## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf alread exists.
-   ## prepare renewal config, so that certbot won't ask questions.
-   ## The name of the config derives from the first domain. That is what certbot does, we do that too.
-   # cat <<EOF | ssh root@$IPADDR "cat > '/etc/letsencrypt/renewal/$DNS_NAME.conf'"
-   # [renewalparams]
-   # installer = apache
-   # apache_vhost_config = /etc/apache2/sites-available/default-ssl.conf
-   # EOF
+    le_backup="le-backup-$(echo "$DNS_NAME" | tr . -).tar.gz"
+    if [ -z "$(find . -maxdepth 1 -type f -name "$le_backup" -mtime -2)" ]; then
+       # we need a fresh certificate
 
-   # install a letsencrypt certificate (with retry, DNS may not yet be ready...)
-   # TODO: this install only works partially, when we have multiple domains in d_opts.
-   d_opts="$(echo \ $FQDNS | sed -e 's/\s\b/ -d /g')"
-   certbot_opts="--non-interactive -m qa@jwqa.de --no-eff-email --agree-tos --redirect --apache $d_opts"
-   echo "+ certbot $certbot_opts"
-   ssh root@$IPADDR certbot $certbot_opts || {
-     echo "Oh, certbot failed?, let's wait 30sec and try again"
-     sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5
-     ssh root@$IPADDR certbot $certbot_opts || {
-       echo "Oh, certbot failed again?, let's try with certonly, without installing into apache"
-       ssh root@$IPADDR certbot certonly $certbot_opts
-     }
-   }
+       ## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf alread exists.
+       ## prepare renewal config, so that certbot won't ask questions.
+       ## The name of the config derives from the first domain. That is what certbot does, we do that too.
+       # cat <<EOF | ssh root@$IPADDR "cat > '/etc/letsencrypt/renewal/$DNS_NAME.conf'"
+       # [renewalparams]
+       # installer = apache
+       # apache_vhost_config = /etc/apache2/sites-available/default-ssl.conf
+       # EOF
 
-   # save the certificate for re-use...
-   ssh root@$IPADDR tar zcf - /etc/letsencrypt > $le_backup
-else
-   # we have a saved certificate for this name that we want to use.
-   echo "Restoring cert from $le_backup ..."
-   ssh root@$IPADDR tar zxf - -C / < $le_backup
-   ssh root@$IPADDR "certbot certificates; certbot --apache install --cert-name $DNS_NAME; systemctl reload apache2"
+       # install a letsencrypt certificate (with retry, DNS may not yet be ready...)
+       # TODO: this install only works partially, when we have multiple domains in d_opts.
+       d_opts="$(echo \ $FQDNS | sed -e 's/\s\b/ -d /g')"
+       certbot_opts="--non-interactive -m qa@jwqa.de --no-eff-email --agree-tos --redirect --apache $d_opts"
+       echo "+ certbot $certbot_opts"
+       ssh root@$IPADDR certbot $certbot_opts || {
+         echo "Oh, certbot failed?, let's wait 30sec and try again"
+         sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5; echo .; sleep 5
+         ssh root@$IPADDR certbot $certbot_opts || {
+           echo "Oh, certbot failed again?, let's try with certonly, without installing into apache"
+           ssh root@$IPADDR certbot certonly $certbot_opts
+         }
+       }
+
+       # save the certificate for re-use...
+       ssh root@$IPADDR tar zcf - /etc/letsencrypt > $le_backup
+    else
+       # we have a saved certificate for this name that we want to use.
+       echo "Restoring cert from $le_backup ..."
+       ssh root@$IPADDR tar zxf - -C / < $le_backup
+       ssh root@$IPADDR "certbot certificates; certbot --apache install --cert-name $DNS_NAME; systemctl reload apache2"
+    fi
 fi
 
 # transfer and run the intialization script on the target host.
