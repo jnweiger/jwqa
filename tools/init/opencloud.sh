@@ -1,17 +1,21 @@
 #! /bin/bash
 #
-# DNS_NAME:     cloud
-# DNS_NAME:     collabora
-# DNS_NAME:     wopiserver
-# DNS_NAME:     traefik
-# DNS_NAME:     keycloak
-# HCLOUD_TYPE:  cx23		# cpx11 2GB, cpx21 4GB, cpx41 8G
-# ENV_VARS_OPT: INIT_ADMIN_PASS
+# ENV_VARS: 	OC_NAME,INIT_ADMIN_PASS
+# DNS_NAME:     cloud.OC_NAME
+# DNS_NAME:     collabora.OC_NAME
+# DNS_NAME:     wopiserver.OC_NAME
+# DNS_NAME:     traefik.OC_NAME
+# DNS_NAME:     keycloak.OC_NAME
+# AUTOSTART_CERTBOT:     false		# we do everything with traefik here. 
+# HCLOUD_TYPE:  cx23			# cx23 4GB, ...
 # OPEN_PORTS:	80,22,443	# not enforced currently, info only.
 #
 # Study
 # - https://github.com/opencloud-eu/opencloud-compose
 # - https://docs.opencloud.eu/docs/admin/getting-started/container/docker-compose/docker-compose-base/
+#
+# TODO:
+# - control OC_VERSION. it seems 
 #
 # CAUTION:
 # * The official quick start documented in https://docs.opencloud.eu/docs/admin/ is:
@@ -38,27 +42,46 @@ sh ./get-docker.sh
 systemctl enable docker
 systemctl start docker
 
-apt install -y curl git vim ca-certificates transport-https
+apt install -y curl git vim ca-certificates
 git clone https://github.com/opencloud-eu/opencloud-compose.git
 
 cd opencloud-compose
 cp .env.example .env
 
-sed -i -e "'s/INSECURE=true/# INSECURE=true/'" .env
-sed -i -e "'s/TRAEFIK_ACME_MAIL=.*/TRAEFIK_ACME_MAIL=$EMAIL/'" .env
-sed -i -e "'s/INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=$admin_pass/'" .env
+sed -i -e "s/INSECURE=true/# INSECURE=true/" .env
+sed -i -e "s/TRAEFIK_ACME_MAIL=.*/TRAEFIK_ACME_MAIL=$EMAIL/" .env
+sed -i -e "s/INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=$admin_pass/" .env
 echo 'COMPOSE_FILE=docker-compose.yml:traefik/opencloud.yml' >> .env
 
 names="cloud collabora wopiserver traefik keycloak"
-for name in $names; do
+# check, if we onw all our DNS entries here.
+for name in $FQDNS; do
+    addr=$(dig +short $name)
+    if [ -z "$addr" ]; then
+        echo "ERROR: failed to retrieve ip addr for: $name"
+	echo "Press ENTER to continue."
+	read a
+    else
+	if ip addr | grep -Fqw '37.27.30.108'; then
+	    echo "$name = $addr is here"
+	else
+            echo "+ hostname -I"
+	    hostname -I
+            echo "ERROR: $name points elsewhere: $addr"
+	    echo "Press ENTER to continue."
+	    read a
+	fi
+   fi
 done
 
-
+TLD=$OC_NAME.$HCLOUD_DNS_ZONE
 for name in $names; do
   ucname=$(echo $name | tr a-z A-Z)
   test "$ucname" == CLOUD && ucname=OC
-  sed -i -e "'s/${ucname}_DOMAIN=.*/${ucname}_DOMAIN=$name.$TLD/'" .env
+  sed -i -e "s/${ucname}_DOMAIN=.*/${ucname}_DOMAIN=$name.$TLD/" .env
 done
+
+docker compose config | grep image:
 
 cat <<EOF
   OpenCloud docker compose environment is prepared.

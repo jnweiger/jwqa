@@ -26,7 +26,8 @@ Usage:
 	export HCLOUD_IMAGE=...			# default: from script # HCLOUD_IMAGE: ... or '$default_hcloud_image'
 	export AUTOSTART_CERTBOT=false		# default: from script # AUTOSTART_CERTBOT: ... or '$default_autostart_certbot'
 	export HCLOUD_LOCATION=...		# default: '$default_hcloud_location'
-	export INIT_...				# all env variables starting with INIT_ are passed into env.sh
+	export INIT_...				# all env variables starting with INIT_ are passed into env.sh (not impl.)
+						# See also script # ENV_VARS: ... this can be used to prerequire some variables.
 
 	$0 [init/]clamav[.sh]			# start a virus scanner machine
 	$0 gitlab				# start a gitlab server
@@ -43,6 +44,11 @@ Usage:
 	hcloud server delete SERVER_NAME; hetzner_dns del SERVER_NAME
 EOF
   exit 0
+fi
+
+if [ -z "$BASH_VERSION" ]; then
+  echo 1>&2 "$0 ERROR: must run with bash, not with \$\$ = $(ps -p $$ -o comm=) ."
+  exit 1
 fi
 
 if [ -z "$HCLOUD_TOKEN" ]; then
@@ -90,7 +96,7 @@ set_name_and_check_zone()
       exit 1
     fi
   fi
-  name="${name%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.
+  name="${name%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.	# hcloud server name may contain dots.
 }
 
 script="$1"	# TODO: handle multiple scripts and/or parameters...
@@ -112,13 +118,24 @@ fi
 
 $verbose && echo "using $(readlink -f $script)"
 
-# extract some variables from the init script
-test -z "$HCLOUD_TYPE"  	&& HCLOUD_TYPE="$(      sed -ne "s@^#\s*HCLOUD_TYPE:\s*@@p"       -e 's@\s.*$@@' $script)"
-test -z "$HCLOUD_IMAGE" 	&& HCLOUD_IMAGE="$(     sed -ne "s@^#\s*HCLOUD_IMAGE:\s*@@p"      -e 's@\s.*$@@' $script)"
-test -z "$HCLOUD_LOCATION" 	&& HCLOUD_LOCATION="$(  sed -ne "s@^#\s*HCLOUD_LOCATION:\s*@@p"   -e 's@\s.*$@@' $script)"
-test -z "$DNS_NAMES"    	&& DNS_NAMES="$(        sed -ne "s@^#\s*DNS_NAME:\s*@@p"          -e 's@\s.*$@@' $script)"
-test -z "$AUTOSTART_CERTBOT"    && AUTOSTART_CERTBOT="$(sed -ne "s@^#\s*AUTOSTART_CERTBOT:\s*@@p" -e 's@\s.*$@@' $script)"
-test -z "$ENV_VARS_OPT"         && ENV_VARS_OPT="$(     sed -ne "s@^#\s*ENV_VARS_OPT:\s*@@p"      -e 's@\s.*$@@' $script)"
+# Extract some variables from the init script
+# Values can contain blanks. A trailing comment and trailing whitespace is removed.
+test -z "$HCLOUD_TYPE"  	&& HCLOUD_TYPE="$(      sed -ne "s@^#\s*HCLOUD_TYPE:\s*@@p"       $script | sed -e 's@#.*$@@' -e 's@\s*$@@')"
+test -z "$HCLOUD_IMAGE" 	&& HCLOUD_IMAGE="$(     sed -ne "s@^#\s*HCLOUD_IMAGE:\s*@@p"      $script | sed -e 's@#.*$@@' -e 's@\s*$@@')"
+test -z "$HCLOUD_LOCATION" 	&& HCLOUD_LOCATION="$(  sed -ne "s@^#\s*HCLOUD_LOCATION:\s*@@p"   $script | sed -e 's@#.*$@@' -e 's@\s*$@@')"
+test -z "$DNS_NAMES"    	&& DNS_NAMES="$(        sed -ne "s@^#\s*DNS_NAME:\s*@@p"          $script | sed -e 's@#.*$@@' -e 's@\s*$@@')"
+test -z "$AUTOSTART_CERTBOT"    && AUTOSTART_CERTBOT="$(sed -ne "s@^#\s*AUTOSTART_CERTBOT:\s*@@p" $script | sed -e 's@#.*$@@' -e 's@\s*$@@')"
+test -z "$ENV_VARS_OPT"         && ENV_VARS_OPT="$(     sed -ne "s@^#\s*ENV_VARS_OPT:\s*@@p"      $script | sed -e 's@#.*$@@' -e 's@\s*$@@')"
+test -z "$ENV_VARS"             && ENV_VARS="$(         sed -ne "s@^#\s*ENV_VARS:\s*@@p"          $script | sed -e 's@#.*$@@' -e 's@\s*$@@')"
+
+for var in $(echo "$ENV_VARS" | tr ',' ' '); do
+    if  [ -n "${!var}" ]; then
+	DNS_NAMES=$(echo "$DNS_NAMES" | sed -e "s#\b$var\b#${!var}#g")
+    else
+        echo "ERROR: $script: ENV_VARS: env variable ${var} is not set"
+	exit 1
+    fi
+done
 
 test -z "$HCLOUD_TYPE"    	&& HCLOUD_TYPE=$default_hcloud_type
 test -z "$HCLOUD_IMAGE"   	&& HCLOUD_IMAGE=$default_hcloud_image
@@ -137,26 +154,27 @@ done
 
 
 origin_label="$(echo "orgin=$(basename $0) $1" | tr ' /:.,;+-' '_')"	# only alpanumeric and _, sigh
+hname="$(echo "$name" | tr ' /:.,;+_' '-')"				# not strictly needed, but hostname looks better, this way.
 
-if [ -n "$(hcloud server ip "$name" 2>/dev/null)" ]; then
-  echo 1>&2 "ERROR: a server named '$name' already exists."
+if [ -n "$(hcloud server ip "$hname" 2>/dev/null)" ]; then
+  echo 1>&2 "ERROR: a server named '$hname' already exists."
   echo 1>&2 "	Specify a different DNS_NAME or try:"
-  echo 1>&2 "	hcloud server delete $name"
+  echo 1>&2 "	hcloud server delete $hname"
   exit 1
 fi
 
 set -x
-hcloud server create --type "$HCLOUD_TYPE" --location "$HCLOUD_LOCATION" --label "$origin_label" $ssh_key_opts --image "$HCLOUD_IMAGE" --name "$name" || exit 1
+hcloud server create --type "$HCLOUD_TYPE" --location "$HCLOUD_LOCATION" --label "$origin_label" $ssh_key_opts --image "$HCLOUD_IMAGE" --name "$hname" || exit 1
 set +x
 
 ssh_opts="-o ConnectTimeout=10 -o CheckHostIP=no -o StrictHostKeyChecking=no -o PasswordAuthentication=no"
 
-IPADDR="$(hcloud server ip "$name")"
+IPADDR="$(hcloud server ip "$hname")"
 test -z "$IPADDR" && exit 1
 
-IPV6ADDR="$(hcloud server ip -6 "$name")"
+IPV6ADDR="$(hcloud server ip -6 "$hname")"
 # inspect server metadata, with a little retry, in case we get "hcloud: (server error)"
-describe_json="$(hcloud server describe "$name" -o json || { echo 1>&2 "retrying hcloud describe ..."; sleep 3;  hcloud server describe "$name" -o json; } )"
+describe_json="$(hcloud server describe "$hname" -o json || { echo 1>&2 "retrying hcloud describe ..."; sleep 3;  hcloud server describe "$hname" -o json; } )"
 HCLOUD_DATACENTER="$(   echo "$describe_json" | jq .datacenter.name -r)"
 HCLOUD_SERVER_CORES="$( echo "$describe_json" | jq .server_type.cores -r)"
 HCLOUD_SERVER_MEMORY="$(echo "$describe_json" | jq .server_type.memory -r)"
@@ -183,7 +201,7 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 last; do
   if [ $i = last ]; then
     echo "$0 ERROR: cannot ssh into machine at $IPADDR -- tried multiple times."
     set -x
-    hcloud server describe -o json "$name" | jq .status
+    hcloud server describe -o json "$hname" | jq .status
     exit 1
   fi
 done
@@ -213,16 +231,20 @@ export HCLOUD_SERVER_DISK=$HCLOUD_SERVER_DISK
 EOF
 )"
 
-for var in $(echo "$ENV_VARS_OPT" | tr ',' ' '); do
-  if  [ -n "${!var}" ]; then
+for var in $(echo "$ENV_VARS,$ENV_VARS_OPT" | tr ',' ' '); do
+  if  [ -n "$var" -a -n "${!var}" ]; then
     echo 1>&2 "ENV_VARS_OPT: importing $var"
     env_sh="$env_sh
 export $var=\"${!var}\""
   fi
 done
 
+echo "$env_sh"
+echo "Press Enter to continue"
+read a
 
-extra_pkg="screen git vim less curl wget xtail ca-certificates transport-https"
+extra_pkg="screen git vim less curl wget xtail ca-certificates"	
+# for older ubuntu: apt-transport-https
 if [ "$AUTOSTART_CERTBOT" == true ]; then
     extra_pkg="$extra_pkg certbot python3-certbot-apache apache2"
 fi
@@ -260,6 +282,7 @@ if [ "$AUTOSTART_CERTBOT" == true ]; then
     ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; systemctl restart apache2'"
 
     # just get something up and running. good for debugging apache chaos.
+    # FIXME: the code here, does not really work reliably.
     print "FIXME: EARLY EXIT without patching apache config"
     exit 0
 
@@ -306,7 +329,7 @@ fi
 
 # transfer and run the intialization script on the target host.
 echo "$env_sh" | ssh root@$IPADDR "cat > env.sh"
-ssh root@$IPADDR "echo 'source env.sh' >> .bashrc"
+ssh root@$IPADDR "echo 'source ~/env.sh' >> .bashrc"
 scp $script root@$IPADDR:INIT.bashrc
 asset_dir="$(echo $script | sed -e 's/\.sh//')"
 if [ -d "$asset_dir" ]; then
