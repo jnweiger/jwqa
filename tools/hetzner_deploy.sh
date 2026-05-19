@@ -5,7 +5,9 @@
 #	export HCLOUD_DNS_ZONE=jwqa.de	# or defaults to finding the zone by suffix match of the fqdn name.
 #       know th eavailable types from hcloud server-type list
 #
-# CAUTION: must block port UDP 111	apt purge rpcbind; systemctl disable --now rpcbind.service
+# blocks port UDP 111	apt purge rpcbind; systemctl disable --now rpcbind.service
+#
+# TODO: if option --help is present togehter with an init script, we should run the init script locally with --help and exit.
 
 verbose=true	# true,false
 
@@ -239,9 +241,9 @@ export $var=\"${!var}\""
   fi
 done
 
-echo "$env_sh"
-echo "Press Enter to continue"
-read a
+# echo "$env_sh"
+# echo "Press Enter to continue"
+# read a
 
 extra_pkg="screen git vim less curl wget xtail ca-certificates"	
 # for older ubuntu: apt-transport-https
@@ -294,7 +296,7 @@ if [ "$AUTOSTART_CERTBOT" == true ]; then
     if [ -z "$(find . -maxdepth 1 -type f -name "$le_backup" -mtime -2)" ]; then
        # we need a fresh certificate
 
-       ## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf alread exists.
+       ## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf already exists.
        ## prepare renewal config, so that certbot won't ask questions.
        ## The name of the config derives from the first domain. That is what certbot does, we do that too.
        # cat <<EOF | ssh root@$IPADDR "cat > '/etc/letsencrypt/renewal/$DNS_NAME.conf'"

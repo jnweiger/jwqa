@@ -1,6 +1,7 @@
 #! /bin/bash
 #
 # ENV_VARS: 	OC_NAME,INIT_ADMIN_PASS
+# ENV_VARS_OPT: OC_VERSION		# E.g. 6.2.0, default: latest
 # DNS_NAME:     cloud.OC_NAME
 # DNS_NAME:     collabora.OC_NAME
 # DNS_NAME:     wopiserver.OC_NAME
@@ -14,9 +15,6 @@
 # - https://github.com/opencloud-eu/opencloud-compose
 # - https://docs.opencloud.eu/docs/admin/getting-started/container/docker-compose/docker-compose-base/
 #
-# TODO:
-# - control OC_VERSION. it seems 
-#
 # CAUTION:
 # * The official quick start documented in https://docs.opencloud.eu/docs/admin/ is:
 #   	curl -L https://opencloud.eu/install | /bin/bash
@@ -25,12 +23,14 @@
 #   - It does not hint at the docker-compose install used here.
 #
 
-source env.sh	# not really needed here.
+source env.sh
 
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
-export EMAIL=jw@example.org
+test -z "$EMAIL" && export EMAIL=admin@$HCLOUD_DNS_ZONE
+docker-compose.yml reacts to OC_DOCKER_TAG
+test -n "$OC_VERSION" -a -z "$OC_DOCKER_TAG" && OC_DOCKER_TAG=$OC_VERSION
 
 admin_pass="$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8)"
 test -n "$INIT_ADMIN_PASS" && export admin_pass="$INIT_ADMIN_PASS"
@@ -83,11 +83,15 @@ done
 
 docker compose config | grep image:
 
+docker compose up
+
 cat <<EOF
   OpenCloud docker compose environment is prepared.
-  Please do the following to start the server:
 
-cd opencloud-compose
-docker compose up
+you can stop the server with CTRL-C here.
+To fully clean up, use
+
+	docker compose down
+	docker volume rm $(docker volume ls -q)
 EOF
 
