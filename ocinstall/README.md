@@ -1,3 +1,4 @@
 ## Scripts for installing opencloud 
 
-No brain required.
+### Install at Hetzner Cloud
+- cd jwqa/tools; env OC_VERSION=6.2.0 hetzner_deploy.sh init/opencloud.sh
