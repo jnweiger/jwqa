@@ -51,7 +51,15 @@ cp .env.example .env
 sed -i -e "s/INSECURE=true/# INSECURE=true/" .env
 sed -i -e "s/TRAEFIK_ACME_MAIL=.*/TRAEFIK_ACME_MAIL=$EMAIL/" .env
 sed -i -e "s/INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=$admin_pass/" .env
-echo 'COMPOSE_FILE=docker-compose.yml:traefik/opencloud.yml' >> .env
+## without collabora or tika
+# echo >> .env 'COMPOSE_FILE=docker-compose.yml:traefik/opencloud.yml'
+## with tika
+# echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:traefik/opencloud.yml'
+## with collabora
+# echo >> .env 'COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
+## with tika and collabora
+echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
+
 
 names="cloud collabora wopiserver traefik keycloak"
 # check, if we onw all our DNS entries here.
@@ -62,7 +70,7 @@ for name in $FQDNS; do
 	echo "Press ENTER to continue."
 	read a
     else
-	if ip addr | grep -Fqw '37.27.30.108'; then
+	if ip addr | grep -Fqw "$IPADDR"; then
 	    echo "$name = $addr is here"
 	else
             echo "+ hostname -I"
