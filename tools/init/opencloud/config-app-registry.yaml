@@ -1,0 +1,55 @@
+# FROM: https://docs.opencloud.eu/docs/next/admin/configuration/collabora/collabora-ms-office-formats
+# place into the opencloud/config/ folder, named app_registry.yml (or app_registry.yaml)
+
+app_registry:
+  mimetypes:
+    - mime_type: application/pdf
+      extension: pdf
+      name: PDF
+      description: PDF document
+      icon: ''
+      default_app: ''
+      allow_creation: false
+    - mime_type: application/vnd.oasis.opendocument.text
+      extension: odt
+      name: Document
+      description: OpenDocument text document
+      icon: ''
+      default_app: Collabora
+      allow_creation: true
+    - mime_type: application/vnd.oasis.opendocument.spreadsheet
+      extension: ods
+      name: Spreadsheet
+      description: OpenDocument spreadsheet document
+      icon: ''
+      default_app: Collabora
+      allow_creation: true
+    - mime_type: application/vnd.oasis.opendocument.presentation
+      extension: odp
+      name: Presentation
+      description: OpenDocument presentation document
+      icon: ''
+      default_app: Collabora
+      allow_creation: true
+    - mime_type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      extension: docx
+      name: Microsoft Word
+      description: Microsoft Word document
+      icon: ''
+      default_app: Collabora
+      allow_creation: true
+    - mime_type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      extension: xlsx
+      name: Microsoft Excel
+      description: Microsoft Excel document
+      icon: ''
+      default_app: Collabora
+      allow_creation: true
+    - mime_type: application/vnd.openxmlformats-officedocument.presentationml.presentation
+      extension: pptx
+      name: Microsoft PowerPoint
+      description: Microsoft PowerPoint document
+      icon: ''
+      default_app: Collabora
+      allow_creation: true
+

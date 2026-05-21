@@ -14,6 +14,7 @@
 # Study
 # - https://github.com/opencloud-eu/opencloud-compose
 # - https://docs.opencloud.eu/docs/admin/getting-started/container/docker-compose/docker-compose-base/
+# - https:/docs.opencloud.eu/docs/next/admin/configuration/collabora/collabora-fonts
 #
 # CAUTION:
 # * The official quick start documented in https://docs.opencloud.eu/docs/admin/ is:
@@ -29,7 +30,7 @@ export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
 test -z "$EMAIL" && export EMAIL=admin@$HCLOUD_DNS_ZONE
-docker-compose.yml reacts to OC_DOCKER_TAG
+# docker-compose.yml reacts to OC_DOCKER_TAG
 test -n "$OC_VERSION" -a -z "$OC_DOCKER_TAG" && OC_DOCKER_TAG=$OC_VERSION
 
 admin_pass="$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8)"
@@ -42,7 +43,9 @@ sh ./get-docker.sh
 systemctl enable docker
 systemctl start docker
 
-apt install -y curl git vim ca-certificates
+# ttf-mscorefonts-installer is mentioned in collabora config docs. The package asks for an EULA. We agree unattended.
+echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
+apt install -y curl git vim ca-certificates ttf-mscorefonts-installer
 git clone https://github.com/opencloud-eu/opencloud-compose.git
 
 cd opencloud-compose
@@ -56,9 +59,10 @@ sed -i -e "s/INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=$admin_pass/" .env
 ## with tika
 # echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:traefik/opencloud.yml'
 ## with collabora
-# echo >> .env 'COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
+echo >> .env 'COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
 ## with tika and collabora
-echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
+# https://github.com/opencloud-eu/opencloud/issues/2807
+# echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
 
 
 names="cloud collabora wopiserver traefik keycloak"
@@ -93,7 +97,7 @@ docker compose config | grep image:
 
 docker compose up
 
-cat <<EOF
+cat <<'EOF'
   OpenCloud docker compose environment is prepared.
 
 you can stop the server with CTRL-C here.
