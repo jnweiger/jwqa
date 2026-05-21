@@ -7,7 +7,7 @@
 # DNS_NAME:     wopiserver.OC_NAME
 # DNS_NAME:     traefik.OC_NAME
 # DNS_NAME:     keycloak.OC_NAME
-# AUTOSTART_CERTBOT:     false		# we do everything with traefik here. 
+# AUTOSTART_CERTBOT:     false		# we do everything with traefik here.
 # HCLOUD_TYPE:  cx23			# cx23 4GB, ...
 # OPEN_PORTS:	80,22,443	# not enforced currently, info only.
 #
@@ -25,6 +25,7 @@
 #
 # TODO:
 #  - make storage driver configurable: STORAGE_USERS=posix ??
+#  - add radicale calender support to .env COMPOSE_FILE=
 
 source env.sh
 
@@ -33,11 +34,14 @@ export DEBIAN_FRONTEND=noninteractive
 
 test -z "$EMAIL" && export EMAIL=admin@$HCLOUD_DNS_ZONE
 # docker-compose.yml reacts to OC_DOCKER_TAG
-test -n "$OC_VERSION" -a -z "$OC_DOCKER_TAG" && OC_DOCKER_TAG=$OC_VERSION
+if [ -n "$OC_VERSION" -a -z "$OC_DOCKER_TAG" ]; then
+  OC_DOCKER_TAG=$OC_VERSION
+  echo >> env.sh 'export OC_DOCKER_TAG="$OC_VERSION"'
+fi
 
 admin_pass="$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8)"
 test -n "$INIT_ADMIN_PASS" && export admin_pass="$INIT_ADMIN_PASS"
-echo "export admin_pass=$admin_pass" >> env.sh
+echo >> env.sh "export admin_pass=$admin_pass"
 
 curl -fsSL https://get.docker.com -o get-docker.sh
 sh ./get-docker.sh
