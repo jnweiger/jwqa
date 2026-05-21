@@ -23,6 +23,8 @@
 #   - It does not seem to work on hetzner cloud.
 #   - It does not hint at the docker-compose install used here.
 #
+# TODO:
+#  - make storage driver configurable: STORAGE_USERS=posix ??
 
 source env.sh
 
