@@ -116,9 +116,11 @@ def check_version(api_url, headers):
 
 def main():
     parser = argparse.ArgumentParser(description="Migrate Checkmk hosts to a new domain or list them.")
-    parser.add_argument("--old-domain", required=False, help="Current top-level domain to filter (e.g., foo.bar.oldtop). If omitted, lists ALL hosts.")
-    parser.add_argument("--new-domain", required=False, help="New top-level domain to set (e.g., newdomain.newtop). If omitted, runs in LIST-ONLY mode.")
+    parser.add_argument("--old-domain", required=False, help="Current top-level domain to filter. If omitted, lists ALL hosts.")
+    parser.add_argument("--new-domain", required=False, help="New top-level domain to set. If omitted, runs in LIST-ONLY mode.")
     parser.add_argument("--site-id", required=True, help="Checkmk Site ID (e.g., cmk_site)")
+    parser.add_argument("-n", "--no-op", action="store_true", help="Dry-run mode: Show what would change but do NOT update or activate.")
+    parser.add_argument("--activate", action="store_true", help="Activate changes after updating. (Required to apply changes to the monitoring engine).")
 
     args = parser.parse_args()
 
@@ -139,35 +141,45 @@ def main():
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
-    # ... after getting token ...
     if not check_version(api_url, headers):
         print("Proceeding anyway, but version check failed.")
 
     # Step 2: Determine Mode
     is_update_mode = bool(args.new_domain)
+    is_no_op = args.no_op
+    is_activate = args.activate
     filter_desc = f"Domain: {args.old_domain}" if args.old_domain else "ALL HOSTS"
 
-    print(f"Mode: {'UPDATE' if is_update_mode else 'LIST-ONLY'}")
+    if is_no_op:
+        print("Mode: DRY-RUN")
+    else:
+        print(f"Mode: {'UPDATE' if is_update_mode else 'LIST-ONLY'}")
+
     print(f"Filter: {filter_desc}")
-    if args.old_domain and not is_update_mode:
-        print(f"Action: Listing hosts that would be changed from '{args.old_domain}' to '{args.new_domain}' (but no change will be made).")
-    elif not args.old_domain and not is_update_mode:
-        print(f"Action: Listing ALL hosts.")
 
     # Step 3: Fetch Hosts
     print(f"Fetching hosts...")
     hosts = fetch_hosts(api_url, headers, args.old_domain)
 
     if not hosts:
-        print("No hosts found matching the criteria.")
+        print(f"ERROR: No hosts found matching {filter_desc}")
         return
 
-    print(f"Found {len(hosts)} hosts.")
-    print("-" * 60)
+    print(f"OK: Found {len(hosts)} hosts.")
 
     # Step 4: Process
     if is_update_mode:
-        # UPDATE MODE
+        if is_no_op:
+            print(f"{'Host Name':<40} | {'Current Domain':<30} | {'New Domain':<30}")
+            print("-" * 105)
+            for host in hosts:
+                host_name = host.get("name")
+                current_domain = host.get("attributes", {}).get("domain", "N/A")
+                print(f"{host_name:<40} | {current_domain:<30} | {args.new_domain:<30}")
+            print(f"Total: {len(hosts)} hosts would be updated.")
+            return
+
+        # Actual Update
         success_count = 0
         for host in hosts:
             host_id = host.get("id")
@@ -184,28 +196,26 @@ def main():
         print(f"Updated {success_count}/{len(hosts)} hosts.")
 
         if success_count > 0:
-            print("Activating changes...")
-            if activate_changes(api_url, headers, args.site_id):
-                print("Changes activated successfully.")
+            if is_activate:
+                print("Activating changes...")
+                if activate_changes(api_url, headers, args.site_id):
+                    print("Changes activated successfully.")
+                else:
+                    print("WARNING: Updates succeeded, but activation failed.")
             else:
-                print("WARNING: Updates succeeded, but activation failed.")
+                print("Changes updated in DB. You need to activate changes in the Web UI now.")
         else:
-            print("No changes made, skipping activation.")
+            print("No changes.")
 
     else:
-        # LIST-ONLY MODE
+        # LIST-ONLY MODE (No --new-domain provided)
         print(f"{'Host Name':<40} | {'Current Domain':<30}")
         print("-" * 75)
         for host in hosts:
             host_name = host.get("name")
             current_domain = host.get("attributes", {}).get("domain", "N/A")
 
-            # If old_domain was specified, we are showing who would change.
-            # If old_domain was NOT specified, we are showing everyone.
-            if args.old_domain:
-                print(f"{host_name:<40} | {current_domain:<30} (Would change to: {args.new_domain})")
-            else:
-                print(f"{host_name:<40} | {current_domain:<30}")
+            print(f"{host_name:<40} | {current_domain:<30}")
 
         print("-" * 75)
         print(f"Total: {len(hosts)} hosts.")
