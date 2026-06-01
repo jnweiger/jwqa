@@ -1,4 +1,27 @@
 #!/usr/bin/env python3
+#
+# (C) 2026 j.weigert@heinlein-support.de
+#
+# Environment variables used:
+#
+#   CMK_API_USER="automation_user"
+#   CMK_API_PASS="your_secure_password_or_token"
+#
+#   CMK_BASE_URL="https://checkmk.yourcompany.com"	# default to http://localhost
+#
+# Requires:
+#	pip install requests
+#
+#
+# 
+# Reference: 
+#	- find -L . -type f -name \*.py  | xargs grep 'Bulk renaming of hosts'
+#	  ./lib/check_mk/gui/wato/pages/host_rename.py:        return _("Bulk renaming of hosts")
+#
+# ATTENTION: Do not use this hosts_rename.py - the API only does a raw rename. There is 
+# much more to renaming, as host names are used as primary keys in all places.
+
+
 import os
 import sys
 import argparse
@@ -6,11 +29,14 @@ import json
 import requests
 from urllib.parse import urljoin
 
+
+
 def get_api_base_url(site_id):
     """Construct the base URL for the Checkmk API."""
     base = os.environ.get('CMK_BASE_URL', 'http://localhost')
     # Ensure no trailing slash in base, then append site and api path
     return f"{base.rstrip('/')}/{site_id}/check_mk/api/1.0"
+
 
 def get_bearer_token(api_url, user, password):
     """Get a Bearer token from Checkmk."""
@@ -27,6 +53,7 @@ def get_bearer_token(api_url, user, password):
         print(f"Error getting token: {e}")
         print(f"Response: {e.response.text}")
         sys.exit(1)
+
 
 def fetch_hosts(api_url, headers, old_domain=None):
     """Fetch hosts. If old_domain is None, fetches all hosts."""
@@ -115,7 +142,9 @@ def check_version(api_url, headers):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Migrate Checkmk hosts to a new domain or list them.")
+    desc= "CAUTION: This is an unfinished exercise. Renaming hosts in checkmk is hard. Please study ./lib/check_mk/gui/wato/pages/host_rename.py and then use\n\t Setup -> hosts Hosts -> Rename multiple hosts\n\n"
+    print(desc)
+    parser = argparse.ArgumentParser(description=desc)
     parser.add_argument("--old-domain", required=False, help="Current top-level domain to filter. If omitted, lists ALL hosts.")
     parser.add_argument("--new-domain", required=False, help="New top-level domain to set. If omitted, runs in LIST-ONLY mode.")
     parser.add_argument("--site-id", required=True, help="Checkmk Site ID (e.g., cmk_site)")
