@@ -35,7 +35,7 @@ export DEBIAN_FRONTEND=noninteractive
 test -z "$EMAIL" && export EMAIL=admin@$HCLOUD_DNS_ZONE
 # docker-compose.yml reacts to OC_DOCKER_TAG
 if [ -n "$OC_VERSION" -a -z "$OC_DOCKER_TAG" ]; then
-  OC_DOCKER_TAG=$OC_VERSION
+  export OC_DOCKER_TAG=$OC_VERSION
   echo >> env.sh 'export OC_DOCKER_TAG="$OC_VERSION"'
 fi
 
@@ -68,7 +68,7 @@ sed -i -e "s/INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=$admin_pass/" .env
 echo >> .env 'COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
 ## with tika and collabora
 # https://github.com/opencloud-eu/opencloud/issues/2807
-# echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
+echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
 
 
 names="cloud collabora wopiserver traefik keycloak"
