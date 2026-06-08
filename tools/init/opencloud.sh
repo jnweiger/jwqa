@@ -16,6 +16,13 @@
 # - https://docs.opencloud.eu/docs/admin/getting-started/container/docker-compose/docker-compose-base/
 # - https:/docs.opencloud.eu/docs/next/admin/configuration/collabora/collabora-fonts
 #
+# Start this with:
+#	export HCLOUD_TOKEN=...
+#	export HCLOUD_DNS_ZONE=...
+#	export HCLOUD_SSHKEY_NAMES=...
+#	export INIT_ADMIN_PASS=...
+# 	env OC_NAME=oc71 OC_VERSION=7.1 hetzner_deploy.sh init/opencloud.sh
+#
 # CAUTION:
 # * The official quick start documented in https://docs.opencloud.eu/docs/admin/ is:
 #   	curl -L https://opencloud.eu/install | /bin/bash
