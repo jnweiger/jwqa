@@ -275,8 +275,24 @@ END
   esac
 fi
 
+
+# fix some some debian UX issues: enable mouse in vim, increase contrast
+ssh root@$IPADDR "cat >> .vimrc" <<END
+" syntax off
+" avoid dark purple on black
+highlight String ctermfg=46
+highlight Number ctermfg=46
+highlight Float ctermfg=46
+" allow copy/paste
+set mouse=
+" avoid tabs in python
+autocmd FileType python setlocal expandtab tabstop=4 shiftwidth=4 softtabstop=4
+END
+# Dark blue for directories (01;34) does not work well on black background.
+ssh root@$IPADDR "echo 'export LS_COLORS=\"\$LS_COLORS:di=01;36\"' >> .bashrc"
+
 # keep public port 111 closed.
-ssh -t root@$IPADDR bash -x -c "'systemctl disable --now rpcbind.service'"	# just to be safe.
+ssh -t root@$IPADDR bash -x -c "'systemctl disable --now rpcbind.service 2>/dev/null'"	# just to be safe.
 ssh -t root@$IPADDR bash -x -c "'for proto in udp tcp; do iptables -A INPUT -p \$proto --dport 111 -j DROP; done'"
 
 if [ "$AUTOSTART_CERTBOT" == true ]; then
