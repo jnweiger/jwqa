@@ -15,19 +15,16 @@ networking:
     public_key_path: "~/.ssh/id_ed25519.pub"
     private_key_path: "~/.ssh/id_ed25519"
 
-masters_pool:
-  instance_type: cpx22          # see: hcloud server-type list
+masters_pool:			# see: hcloud server-type list
+  instance_type: cx23          	# cx23 only in hel1
   instance_count: 3
-  locations: [ hel1, hel1, nbg1 ]	# fsn1 today does not want to create any cpx22
+  locations: [ hel1, hel1, hel1 ]	# fsn1 today does not want to create any cpx22
 
 worker_node_pools:
   - name: workers
-    instance_type: cpx22
+    instance_type: ccx13		# ccx13 works fine in nbg1.
     instance_count: 3
-    locations:
-    - fsn1
-    - hel1
-    - nbg1
+    location: nbg1
 
 additional_packages:
   - vim screen git
