@@ -2,6 +2,7 @@
 #
 # ENV_VARS: 	OC_NAME,INIT_ADMIN_PASS
 # ENV_VARS_OPT: OC_VERSION		# E.g. 6.2.0, default: latest
+# ENV_VARS_OPT: OC_DOCKER_TAG,OC_DOCKER_IMAGE		# default: OC_DOCKER_IMAGE=opencloudeu/opencloud-rolling
 # DNS_NAME:     cloud.OC_NAME
 # DNS_NAME:     collabora.OC_NAME
 # DNS_NAME:     wopiserver.OC_NAME
@@ -21,7 +22,8 @@
 #	export HCLOUD_DNS_ZONE=...
 #	export HCLOUD_SSHKEY_NAMES=...
 #	export INIT_ADMIN_PASS=...
-# 	env OC_NAME=oc71 OC_VERSION=7.1 hetzner_deploy.sh init/opencloud.sh
+# 	env OC_NAME=oc71  OC_VERSION=7.1 hetzner_deploy.sh init/opencloud.sh
+#       env OC_NAME=oc72d1 OC_VERSION=7.2-$(date +%Y%m%d) OC_DOCKER_TAG=daily OC_DOCKER_IMAGE=opencloudeu/opencloud-rolling hetzner_deploy.sh opencloud
 #
 # CAUTION:
 # * The official quick start documented in https://docs.opencloud.eu/docs/admin/ is:
@@ -68,14 +70,14 @@ sed -i -e "s/INSECURE=true/# INSECURE=true/" .env
 sed -i -e "s/TRAEFIK_ACME_MAIL=.*/TRAEFIK_ACME_MAIL=$EMAIL/" .env
 sed -i -e "s/INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=$admin_pass/" .env
 ## without collabora or tika
-# echo >> .env 'COMPOSE_FILE=docker-compose.yml:traefik/opencloud.yml'
+echo >> .env 'COMPOSE_FILE=docker-compose.yml:traefik/opencloud.yml'
 ## with tika
 # echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:traefik/opencloud.yml'
 ## with collabora
-echo >> .env 'COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
+#echo >> .env 'COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
 ## with tika and collabora
 # https://github.com/opencloud-eu/opencloud/issues/2807
-echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
+# echo >> .env 'COMPOSE_FILE=docker-compose.yml:search/tika.yml:weboffice/collabora.yml:traefik/opencloud.yml:traefik/collabora.yml'
 
 
 names="cloud collabora wopiserver traefik keycloak"

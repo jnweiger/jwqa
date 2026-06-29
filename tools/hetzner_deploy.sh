@@ -134,7 +134,9 @@ for var in $(echo "$ENV_VARS" | tr ',' ' '); do
     if  [ -n "${!var}" ]; then
 	DNS_NAMES=$(echo "$DNS_NAMES" | sed -e "s#\b$var\b#${!var}#g")
     else
-        echo "ERROR: $script: ENV_VARS: env variable ${var} is not set"
+	echo "ERROR: ENV_VARS: env variable ${var} is not set"
+	echo "try:"
+	echo "	 head -30 $script"
 	exit 1
     fi
 done
@@ -358,4 +360,4 @@ ssh -t root@$IPADDR screen -L -m "bash -c 'source INIT.bashrc; exec bash'"
 
 echo ""
 echo "Hint: When you no longer need this server, you can remove it with:"
-echo "	hcloud server delete $name"
+echo "	hcloud server delete $hname"
