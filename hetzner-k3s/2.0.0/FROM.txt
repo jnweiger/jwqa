@@ -1,0 +1,3 @@
+https://github.com/Checkmk/checkmk/blob/2.0.0/doc/treasures/kubernetes/check_mk_rbac.yaml
+-> https://raw.githubusercontent.com/Checkmk/checkmk/refs/heads/2.0.0/doc/treasures/kubernetes/check_mk_rbac.yaml
+
