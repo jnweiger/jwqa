@@ -56,6 +56,7 @@ def parse_args(argv):
 def vw_sql(query):
     if not server_ssh:
         raise EnvironmentError(f"{sys.argv[0]}: ERROR: env variable VW_SERVER_SSH is not defined")
+    # FIXME: we guard against shell, but we are probably prone to SQL injection.
     proc = subprocess.run( sqlite_cmd + [shlex.quote(query)], check=True, stdout=subprocess.PIPE, universal_newlines=True)
     return json.loads(proc.stdout or "[]")
 
@@ -123,7 +124,7 @@ def main(argv=None):
 
   print(args, file=sys.stderr)
   if args.list and args.group is None:
-    group_list = vw_sql("select uuid,organizations_uuid,name,access_all from groups")
+    group_list = vw_sql("select uuid, organizations_uuid, name, access_all from groups")
     if args.json:
       print(json.dumps(group_list))
     else:
@@ -135,7 +136,7 @@ def main(argv=None):
     if is_uuid(args.group):
       guuid = args.group
     else:
-      group = vw_sql(f"select uuid from groups where name =='{args.group}'")
+      group = vw_sql(f"select uuid from groups where name == '{args.group}'")
       if not len(group):
          print(f"ERROR: cannot find group name '{args.group}'")
          sys.exit(1)
@@ -145,8 +146,30 @@ def main(argv=None):
   if args.list:
     if args.kind == "all" or args.kind.startswith('u'):
       print(f"Group '{guuid}' users:")
+      orguser_list  = vw_sql(f"select users_organizations_uuid from groups_users where groups_uuid == '{guuid}'")
+      ou_in_list = "', '".join([x["users_organizations_uuid"] for x in orguser_list])
+      uu_list = vw_sql(f"select user_uuid from users_organizations where uuid in ('{ou_in_list}')")
+      uu_in_list = "', '".join([x["user_uuid"] for x in uu_list])
+      user_list = vw_sql(f"select uuid, name, email from users where uuid in ('{uu_in_list}')")
+      if args.json:
+        print(json.dumps(user_list))
+      else:
+        for u in user_list:
+          print(f"\t{u['uuid']} {u['name']} <{u['email']}>")
+
     if args.kind == "all" or args.kind.startswith('c'):
       print(f"Group '{guuid}' collections:")
+      collection_uuid_list = vw_sql(f"select collections_uuid, read_only, hide_passwords from collections_groups where groups_uuid == '{guuid}'")
+      collection_name_list = vw_cli(["list", "collections"])
+      collection_uuid2name = { item['id']: item['name'] for item in collection_name_list }
+      if args.json:
+        for c in collection_uuid_list:
+          c['name'] = collection_uuid2name[c['collections_uuid']] 
+        print(json.dumps(collection_uuid_list))
+      else:
+        for c in collection_uuid_list:
+          print(f"\t{c['collections_uuid']} ro={c['read_only']} pw={1-c['hide_passwords']} '{collection_uuid2name[c['collections_uuid']]}'")
+
     return
       
   print("not impl.")
@@ -157,15 +180,15 @@ def main(argv=None):
 #   #  {'object': 'collection', 'id': '1d408c16-43a6-4b13-97f3-74b0bd250b9f', 'organizationId': '9051a55c-e6d0-45bf-843e-7add02ef88b0', 'name': 'YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY', 'externalId': None},
 #   # ...
 #   
-#   user_list = vw_sql("select uuid,email,name from users")
+#   user_list = vw_sql("select uuid, email, name from users")
 #   # [{'uuid': 'c4b9047d-f41c-499f-b26b-1caf83ed16cb', 'email': 'j.XXXXXXXXXXXXXXXXXXXXXXXXXXX', 'name': 'j.XXXXXXXXXXXXXXXXXXXXXXXXXXX'},
 #   #  {'uuid': '20d0f8be-2676-4d0b-bb0e-f051cc11072a', 'email': 't.XXXXXXXXXXXXXXXXXXXXXXXXXX', 'name': 't.XXXXXXXXXXXXXXXXXXXXXXXXXX'},
 #   #  {'uuid': '11db9933-aa89-41a4-ae31-c6e3cd1db8c1', 'email': 'testy@XXXXXXXXXXXXXXXXXXX', 'name': 'testy@XXXXXXXXXXXXXXXXXXX'}]
 #   # ...
-#   orguser_list          = vw_sql("select uuid,user_uuid from users_organizations")
-#   group_list            = vw_sql("select uuid,organizations_uuid,name,access_all from groups")
+#   orguser_list          = vw_sql("select uuid, user_uuid from users_organizations")
+#   group_list            = vw_sql("select uuid, organizations_uuid, name, access_all from groups")
 #   group_orguser_list    = vw_sql("select groups_uuid, users_organizations_uuid from groups_users")
-#   collection_group_list = vw_sql("select collections_uuid,groups_uuid,read_only,hide_passwords from collections_groups")
+#   collection_group_list = vw_sql("select collections_uuid, groups_uuid, read_only, hide_passwords from collections_groups")
 #   
 #   user_email2uuid    = { item['email']: item['uuid'] for item in user_list }
 #   user_uuid2email    = { item['uuid']: item['email'] for item in user_list }
