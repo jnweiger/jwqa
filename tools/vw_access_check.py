@@ -51,16 +51,17 @@ user_list = vw_sql("select uuid,email,name from users")
 #  {'uuid': '20d0f8be-2676-4d0b-bb0e-f051cc11072a', 'email': 't.XXXXXXXXXXXXXXXXXXXXXXXXXX', 'name': 't.XXXXXXXXXXXXXXXXXXXXXXXXXX'},
 #  {'uuid': '11db9933-aa89-41a4-ae31-c6e3cd1db8c1', 'email': 'testy@XXXXXXXXXXXXXXXXXXX', 'name': 'testy@XXXXXXXXXXXXXXXXXXX'}]
 # ...
-orguser_list       = vw_sql("select uuid,user_uuid from users_organizations")
-group_list         = vw_sql("select uuid,organizations_uuid,name,access_all from groups")
-group_orguser_list = vw_sql("select groups_uuid, users_organizations_uuid from groups_users")
+orguser_list          = vw_sql("select uuid,user_uuid from users_organizations")
+group_list            = vw_sql("select uuid,organizations_uuid,name,access_all from groups")
+group_orguser_list    = vw_sql("select groups_uuid, users_organizations_uuid from groups_users")
+collection_group_list = vw_sql("select collections_uuid,groups_uuid,read_only,hide_passwords from collections_groups")
 
-user_email2uuid = { item['email']: item['uuid'] for item in user_list }
-user_uuid2email = { item['uuid']: item['email'] for item in user_list }
-user_uuid2name  = { item['uuid']: item['name'] for item in user_list }
-group_byuuid    = { item['uuid']: item         for item in group_list }
-
+user_email2uuid    = { item['email']: item['uuid'] for item in user_list }
+user_uuid2email    = { item['uuid']: item['email'] for item in user_list }
+user_uuid2name     = { item['uuid']: item['name'] for item in user_list }
 user_uuid2orguuid  = { item['user_uuid']: item['uuid'] for item in orguser_list }
+
+group_byuuid    = { item['uuid']: item         for item in group_list }
 
 collection_uuid2name = { item['id']: item['name'] for item in collection_list }
 collection_name2uuid = { item['name']: item['id'] for item in collection_list }
@@ -73,9 +74,17 @@ for item in group_orguser_list:
   else:
     user_orguuid2groups[u].append(item["groups_uuid"])
 
+group_uuid2colls = {}
+for item in collection_group_list:
+  g = item['groups_uuid']
+  if g not in group_uuid2colls:
+    group_uuid2colls[g] = [ item ]
+  else:
+    group_uuid2colls[g].append(item)
 
-print(user_email2uuid)
-print(user_orguuid2groups)
+
+# print(user_email2uuid)
+# print(user_orguuid2groups)
 # print(collection_name2uuid.keys())
 
 for user_email in user_email2uuid.keys():
@@ -96,8 +105,14 @@ for user_email in user_email2uuid.keys():
     print(f"user {user_print} orguuid {o} not found in sqlite table groups_users")
     next
 
+  # list all groups for this user
   print(f"groups of {user_print}:")
   for g in gl:
     print(f"\t{g} {group_byuuid[g]['name']}")
+    # list all collections for this user group
+    if g in group_uuid2colls:
+      for c in group_uuid2colls[g]:
+        # print(f"\t\t{c['collections_uuid']} ro={c['read_only']} h={c['hide_passwords']} {collections_uuid.get(c['collections_uuid'], '-?-')}")
+        print(f"\t\t{c['collections_uuid']} {'ro' if c['read_only'] else 'rw' } {'nop' if c['hide_passwords'] else '   '} {collection_uuid2name.get(c['collections_uuid'], '('+c['collections_uuid']+')' )}")
 
 
