@@ -119,11 +119,16 @@ def is_uuid(text):
     return False
 
 
-def main(argv=None):
-  args = parse_args(argv)
+def group_uuid(name_or_id):
+  if is_uuid(name_or_id):
+    return name_or_id
+  group = vw_sql(f"select uuid from groups where name == '{name_or_id}'")
+  if not len(group):
+    return None
+  return group[0]["uuid"]
 
-  print(args, file=sys.stderr)
-  if args.list and args.group is None:
+
+def cmd_list_groups(args):
     group_list = vw_sql("select uuid, organizations_uuid, name, access_all from groups")
     if args.json:
       print(json.dumps(group_list))
@@ -132,20 +137,24 @@ def main(argv=None):
         print(f"{g['uuid']}\t{shlex.quote(g['name'])}")
     return
 
-  if args.group:
-    if is_uuid(args.group):
-      guuid = args.group
-    else:
-      group = vw_sql(f"select uuid from groups where name == '{args.group}'")
-      if not len(group):
-         print(f"ERROR: cannot find group name '{args.group}'")
-         sys.exit(1)
-      guuid = group[0]["uuid"]
-  print(guuid)
 
-  if args.list:
-    if args.kind == "all" or args.kind.startswith('u'):
-      print(f"Group '{guuid}' users:")
+def cmd_list_collections(args, guuid):
+      print(f"Collections:")
+      collection_uuid_list = vw_sql(f"select collections_uuid, read_only, hide_passwords from collections_groups where groups_uuid == '{guuid}'")
+      collection_name_list = vw_cli(["list", "collections"])
+      collection_uuid2name = { item['id']: item['name'] for item in collection_name_list }
+      if args.json:
+        for c in collection_uuid_list:
+          c['name'] = collection_uuid2name[c['collections_uuid']] 
+        print(json.dumps(collection_uuid_list))
+      else:
+        for c in collection_uuid_list:
+          cu = c['collections_uuid']
+          print(f"\t{cu} ro={c['read_only']} pw={1-c['hide_passwords']} '{collection_uuid2name.get(cu, '-?-')}'")
+
+
+def cmd_list_users(args, guuid):
+      print(f"Users:")
       orguser_list  = vw_sql(f"select users_organizations_uuid from groups_users where groups_uuid == '{guuid}'")
       ou_in_list = "', '".join([x["users_organizations_uuid"] for x in orguser_list])
       uu_list = vw_sql(f"select user_uuid from users_organizations where uuid in ('{ou_in_list}')")
@@ -157,34 +166,101 @@ def main(argv=None):
         for u in user_list:
           print(f"\t{u['uuid']} {u['name']} <{u['email']}>")
 
-    if args.kind == "all" or args.kind.startswith('c'):
-      print(f"Group '{guuid}' collections:")
-      collection_uuid_list = vw_sql(f"select collections_uuid, read_only, hide_passwords from collections_groups where groups_uuid == '{guuid}'")
-      collection_name_list = vw_cli(["list", "collections"])
-      collection_uuid2name = { item['id']: item['name'] for item in collection_name_list }
-      if args.json:
-        for c in collection_uuid_list:
-          c['name'] = collection_uuid2name[c['collections_uuid']] 
-        print(json.dumps(collection_uuid_list))
-      else:
-        for c in collection_uuid_list:
-          print(f"\t{c['collections_uuid']} ro={c['read_only']} pw={1-c['hide_passwords']} '{collection_uuid2name[c['collections_uuid']]}'")
 
+def user_lookup_all(names):
+  user_list = vw_sql(f"select uuid, name, email from users")
+  r = []
+  for name in names:
+    uu = user_lookup(user_list, name)
+    if not len(uu):
+      return None, f"user {name} not found"
+    r.extend(uu)
+  return r, None
+
+
+def user_lookup(user_list, name):
+  r = []
+  for u in user_list:
+    if name[-1] == '*':     # ends in *, do globbing
+      if   u['uuid' ].startswith(name[:-1]): r.append(u['uuid'])
+      elif u['email'].startswith(name[:-1]): r.append(u['uuid'])
+      elif u['name' ].startswith(name[:-1]): r.append(u['uuid'])
+    else:
+      if   u['uuid' ] == name: r.append(u['uuid'])
+      elif u['email'] == name: r.append(u['uuid'])
+      elif u['name' ] == name: r.append(u['uuid'])
+  return r
+
+
+def map_user_uuid2orguuid(uu_list):
+  orguser_list = vw_sql("select uuid, user_uuid from users_organizations")
+  user_uuid2orguuid  = { item['user_uuid']: item['uuid'] for item in orguser_list }
+  return [user_uuid2orguuid[uu] for uu in uu_list]
+
+
+def collection_lookup_all(names):
+  collection_name_list = vw_cli(["list", "collections"])
+  r = []
+  for name in names:
+    uu = collection_lookup(collection_name_list, name)
+    if not len(uu):
+      return None, f"collection {name} not found"
+    r.extend(uu)
+  return r, None
+
+
+def collection_lookup(col_list, name):
+  r = []
+  for c in col_list:
+    if name[-1] == '*':     # ends in *, do globbing
+      if   c['id'  ].startswith(name[:-1]): r.append(c['id'])
+      elif c['name'].startswith(name[:-1]): r.append(c['id'])
+    else:
+      if   c['id'  ] == name: r.append(c['id'])
+      elif c['name'] == name: r.append(c['id'])
+  return r
+
+
+def main(argv=None):
+  args = parse_args(argv)
+
+  print(args, file=sys.stderr)
+  if not args.group:
+    cmd_list_groups(args, guuid)
     return
-      
+
+  # else
+  guuid = group_uuid(args.group)
+  if not guuid:
+    print(f"ERROR: cannot find group name '{args.group}'")
+    sys.exit(1)
+  print(f"Group: uuid={guuid}")
+
+  if args.list:
+    if args.kind == "all" or args.kind.startswith('u'):
+      cmd_list_users(args, guuid)
+
+    if args.kind == "all" or args.kind.startswith('c'):
+      cmd_list_collections(args, guuid)
+    return
+
+  if args.kind.startswith('u'):
+    if args.cmd == "del":
+      print(f"deleting user(s) {str(args.names)} from group {guuid}")
+      uu, err = user_lookup_all(args.names)
+      ouu = map_user_uuid2orguuid(uu)
+      print([uu, ouu, err])
+
+  if args.kind.startswith('c'):
+    if args.cmd == "del":
+      print(f"deleting collection(s) {str(args.names)} from group {guuid}")
+      uu, err = collection_lookup_all(args.names)
+      print(uu, err)
+
   print("not impl.")
 
-#   collection_list = vw_cli(["list", "collections"])
-#   # [{'object': 'collection', 'id': '389811e6-38db-460b-8eff-bd4a7fc0c8a7', 'organizationId': '9051a55c-e6d0-45bf-843e-7add02ef88b0', 'name': 'Default collection', 'externalId': None},
-#   #  {'object': 'collection', 'id': '8cec38c7-264b-49ff-af97-a8bdef50e146', 'organizationId': '9051a55c-e6d0-45bf-843e-7add02ef88b0', 'name': 'XXXXXXXXXXXXXXXXXXXXXXXX', 'externalId': None},
-#   #  {'object': 'collection', 'id': '1d408c16-43a6-4b13-97f3-74b0bd250b9f', 'organizationId': '9051a55c-e6d0-45bf-843e-7add02ef88b0', 'name': 'YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY', 'externalId': None},
-#   # ...
-#   
+
 #   user_list = vw_sql("select uuid, email, name from users")
-#   # [{'uuid': 'c4b9047d-f41c-499f-b26b-1caf83ed16cb', 'email': 'j.XXXXXXXXXXXXXXXXXXXXXXXXXXX', 'name': 'j.XXXXXXXXXXXXXXXXXXXXXXXXXXX'},
-#   #  {'uuid': '20d0f8be-2676-4d0b-bb0e-f051cc11072a', 'email': 't.XXXXXXXXXXXXXXXXXXXXXXXXXX', 'name': 't.XXXXXXXXXXXXXXXXXXXXXXXXXX'},
-#   #  {'uuid': '11db9933-aa89-41a4-ae31-c6e3cd1db8c1', 'email': 'testy@XXXXXXXXXXXXXXXXXXX', 'name': 'testy@XXXXXXXXXXXXXXXXXXX'}]
-#   # ...
 #   orguser_list          = vw_sql("select uuid, user_uuid from users_organizations")
 #   group_list            = vw_sql("select uuid, organizations_uuid, name, access_all from groups")
 #   group_orguser_list    = vw_sql("select groups_uuid, users_organizations_uuid from groups_users")
