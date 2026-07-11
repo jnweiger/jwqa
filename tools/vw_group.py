@@ -61,7 +61,8 @@ def parse_args(argv):
 
 def vw_sql(query):
     if not server_ssh:
-        raise EnvironmentError(f"{sys.argv[0]}: ERROR: env variable VW_SERVER_SSH is not defined")
+        print(f"{sys.argv[0]}: ERROR: env variable VW_SERVER_SSH is not defined")
+        sys.exit(1)
     # FIXME: we guard against shell, but we are probably prone to SQL injection.
     proc = subprocess.run( sqlite_cmd + [shlex.quote(query)], check=True, stdout=subprocess.PIPE, universal_newlines=True)
     return json.loads(proc.stdout or "[]")
@@ -70,11 +71,13 @@ def vw_sql(query):
 def vw_cli(cmd):
     vw_session = os.environ.get("VW_SESSION")
     if not vw_session:
-        raise EnvironmentError(f"{sys.argv[0]}: ERROR: env variable VW_SESSION is not defined")
+        print(f"{sys.argv[0]}: ERROR: env variable VW_SESSION is not defined")
+        sys.exit(1)
 
     vw_cli_home = os.environ.get("VW_CLI_HOME")
     if not vw_cli_home:
-        raise EnvironmentError(f"{sys.argv[0]}: ERROR: env variable VW_CLI_HOME is not defined")
+        print(f"{sys.argv[0]}: ERROR: env variable VW_CLI_HOME is not defined")
+        sys.exit(1)
 
     env = os.environ.copy()
     env["HOME"] = vw_cli_home
@@ -232,7 +235,7 @@ def main(argv=None):
 
   print(args, file=sys.stderr)
   if not args.group:
-    cmd_list_groups(args, guuid)
+    cmd_list_groups(args)
     return
 
   # else
@@ -275,26 +278,37 @@ def main(argv=None):
       return
 
   if args.kind.startswith('c'):
+    uu, err = collection_lookup_all(args.names)
+    print(uu, err)
     if args.cmd == "del":
       print(f"deleting collection(s) {str(args.names)} from group {guuid}")
-      uu, err = collection_lookup_all(args.names)
-      print(uu, err)
+      cmd = ""
+      print(f"SQL: {cmd};")
+      r = vw_sql(cmd)
+      if len(r): print(f"ERROR: {cmd}; -> {r}")
+      return
 
-  print("not impl.")
+    if args.cmd == "add":
+      if not args.permission:
+        print(f"ERRPR: no permissions specified with: collection add\nTry using -p ...")
+        sys.exit(1)
+      print(f"adding collection(s) {str(args.names)} to group {guuid}")
+      cmd = ""
+      print(f"SQL: {cmd};")
+      r = vw_sql(cmd)
+      if len(r): print(f"ERROR: {cmd}; -> {r}")
+      return
+
+  print("not impl.")    # anything else
 
 
-#   user_list = vw_sql("select uuid, email, name from users")
-#   orguser_list          = vw_sql("select uuid, user_uuid from users_organizations")
-#   group_list            = vw_sql("select uuid, organizations_uuid, name, access_all from groups")
 #   group_orguser_list    = vw_sql("select groups_uuid, users_organizations_uuid from groups_users")
 #   collection_group_list = vw_sql("select collections_uuid, groups_uuid, read_only, hide_passwords from collections_groups")
 #   
 #   user_email2uuid    = { item['email']: item['uuid'] for item in user_list }
 #   user_uuid2email    = { item['uuid']: item['email'] for item in user_list }
 #   user_uuid2name     = { item['uuid']: item['name'] for item in user_list }
-#   user_uuid2orguuid  = { item['user_uuid']: item['uuid'] for item in orguser_list }
 #   
-#   group_byuuid    = { item['uuid']: item         for item in group_list }
 #   
 #   collection_uuid2name = { item['id']: item['name'] for item in collection_list }
 #   collection_name2uuid = { item['name']: item['id'] for item in collection_list }
