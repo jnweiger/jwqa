@@ -8,6 +8,12 @@
 #
 # 2026 (C) j.weigert@heinlein-support.de
 #
+# Trailing * globbing is supported with user names, emails, uuids and collection names.
+# - vw_group.py GROUP add user 'testy*'      # Already added is silently ignored.
+# - vw_group.py GROUP del user 'testy*'      # Already not member is silently ignored.
+#
+# CAUTION, the sqlite db seems to be not locked, when vautwarden runs. We just apply changes to the db
+#   without any preparation. It is unclear, if this is really safe while the server runs. It seems so.
 
 import sys, os, json, subprocess, shlex
 import argparse, uuid
@@ -122,14 +128,14 @@ def is_uuid(text):
 def group_uuid(name_or_id):
   if is_uuid(name_or_id):
     return name_or_id
-  group = vw_sql(f"select uuid from groups where name == '{name_or_id}'")
+  group = vw_sql(f"SELECT uuid FROM groups WHERE name == '{name_or_id}'")
   if not len(group):
     return None
   return group[0]["uuid"]
 
 
 def cmd_list_groups(args):
-    group_list = vw_sql("select uuid, organizations_uuid, name, access_all from groups")
+    group_list = vw_sql("SELECT uuid, organizations_uuid, name, access_all FROM groups")
     if args.json:
       print(json.dumps(group_list))
     else:
@@ -140,7 +146,7 @@ def cmd_list_groups(args):
 
 def cmd_list_collections(args, guuid):
       print(f"Collections:")
-      collection_uuid_list = vw_sql(f"select collections_uuid, read_only, hide_passwords from collections_groups where groups_uuid == '{guuid}'")
+      collection_uuid_list = vw_sql(f"SELECT collections_uuid, read_only, hide_passwords FROM collections_groups WHERE groups_uuid == '{guuid}'")
       collection_name_list = vw_cli(["list", "collections"])
       collection_uuid2name = { item['id']: item['name'] for item in collection_name_list }
       if args.json:
@@ -155,11 +161,11 @@ def cmd_list_collections(args, guuid):
 
 def cmd_list_users(args, guuid):
       print(f"Users:")
-      orguser_list  = vw_sql(f"select users_organizations_uuid from groups_users where groups_uuid == '{guuid}'")
+      orguser_list  = vw_sql(f"SELECT users_organizations_uuid FROM groups_users WHERE groups_uuid == '{guuid}'")
       ou_in_list = "', '".join([x["users_organizations_uuid"] for x in orguser_list])
-      uu_list = vw_sql(f"select user_uuid from users_organizations where uuid in ('{ou_in_list}')")
+      uu_list = vw_sql(f"SELECT user_uuid FROM users_organizations WHERE uuid IN ('{ou_in_list}')")
       uu_in_list = "', '".join([x["user_uuid"] for x in uu_list])
-      user_list = vw_sql(f"select uuid, name, email from users where uuid in ('{uu_in_list}')")
+      user_list = vw_sql(f"SELECT uuid, name, email FROM users WHERE uuid IN ('{uu_in_list}')")
       if args.json:
         print(json.dumps(user_list))
       else:
@@ -168,7 +174,7 @@ def cmd_list_users(args, guuid):
 
 
 def user_lookup_all(names):
-  user_list = vw_sql(f"select uuid, name, email from users")
+  user_list = vw_sql(f"SELECT uuid, name, email FROM users")
   r = []
   for name in names:
     uu = user_lookup(user_list, name)
@@ -193,7 +199,7 @@ def user_lookup(user_list, name):
 
 
 def map_user_uuid2orguuid(uu_list):
-  orguser_list = vw_sql("select uuid, user_uuid from users_organizations")
+  orguser_list = vw_sql("SELECT uuid, user_uuid FROM users_organizations")
   user_uuid2orguuid  = { item['user_uuid']: item['uuid'] for item in orguser_list }
   return [user_uuid2orguuid[uu] for uu in uu_list]
 
@@ -245,11 +251,28 @@ def main(argv=None):
     return
 
   if args.kind.startswith('u'):
+    uu, err = user_lookup_all(args.names)
+    ouu = map_user_uuid2orguuid(uu)
+    print([uu, ouu, err])
+
     if args.cmd == "del":
       print(f"deleting user(s) {str(args.names)} from group {guuid}")
-      uu, err = user_lookup_all(args.names)
-      ouu = map_user_uuid2orguuid(uu)
-      print([uu, ouu, err])
+      ouu_in_list = "', '".join(ouu)
+      cmd = f"DELETE FROM groups_users WHERE groups_uuid == '{guuid}' AND users_organizations_uuid IN ('{ouu_in_list}')"
+      print(f"SQL: {cmd};")
+      r = vw_sql(cmd)
+      if len(r): print(f"ERROR: {cmd}; -> {r}")
+      return
+
+    if args.cmd == "add":
+      # sqlite supports multi value inserts:
+      # INSERT INTO employees (name, salary) VALUES ('Bob Wilson', 45000), ('Carol White', 60000);
+      val_list = [f"('{guuid}', '{u}')" for u in ouu]
+      cmd = f"INSERT OR IGNORE INTO groups_users (groups_uuid, users_organizations_uuid) VALUES {', '.join(val_list)}"
+      print(f"SQL: {cmd};")
+      r = vw_sql(cmd)
+      if len(r): print(f"ERROR: {r}")
+      return
 
   if args.kind.startswith('c'):
     if args.cmd == "del":
