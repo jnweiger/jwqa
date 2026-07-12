@@ -65,13 +65,13 @@ def parse_permission(p):
     r['read_only'] = 0
     r['hide_passwords'] = 0
   if "ro"   in a: r['read_only'] = 1
-  if "nopw" in a: r['hide_passwords'] = 0
-  if "pw"   in a: r['hide_passwords'] = 1
+  if "pw"   in a: r['hide_passwords'] = 0
+  if "nopw" in a: r['hide_passwords'] = 1
   if len(r) != 2:
     print(f"ERROR: permission: use one of: 'rw', 'ro,pw', 'ro,nopw'")
     sys.exit(1)
 
-  return r
+  return (r['read_only'], r['hide_passwords'])
 
 
 def vw_sql(query):
@@ -308,9 +308,10 @@ def main(argv=None):
       if not args.permission:
         print(f"ERRPR: no permissions specified with: collection add\nTry using -p ...")
         sys.exit(1)
-      p = parse_permission(args.permission)
+      r,h = parse_permission(args.permission)
+      val_list = [f"('{guuid}', '{c}', '{r}', '{h}')" for c in uu]
       print(f"adding collection(s) {str(args.names)} to group {guuid}")
-      cmd = ""
+      cmd = f"INSERT OR IGNORE INTO collections_groups (groups_uuid, collections_uuid, read_only, hide_passwords) VALUES {', '.join(val_list)}"
       print(f"SQL: {cmd};")
       r = vw_sql(cmd)
       if len(r): print(f"ERROR: {cmd}; -> {r}")
