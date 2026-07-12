@@ -58,6 +58,21 @@ def parse_args(argv):
     return args
 
 
+def parse_permission(p):
+  a = p.split(',')
+  r = {}
+  if "rw"   in a:
+    r['read_only'] = 0
+    r['hide_passwords'] = 0
+  if "ro"   in a: r['read_only'] = 1
+  if "nopw" in a: r['hide_passwords'] = 0
+  if "pw"   in a: r['hide_passwords'] = 1
+  if len(r) != 2:
+    print(f"ERROR: permission: use one of: 'rw', 'ro,pw', 'ro,nopw'")
+    sys.exit(1)
+
+  return r
+
 
 def vw_sql(query):
     if not server_ssh:
@@ -279,10 +294,11 @@ def main(argv=None):
 
   if args.kind.startswith('c'):
     uu, err = collection_lookup_all(args.names)
+    uu_in_list = "', '".join(uu)
     print(uu, err)
     if args.cmd == "del":
       print(f"deleting collection(s) {str(args.names)} from group {guuid}")
-      cmd = ""
+      cmd = f"DELETE FROM collections_groups WHERE groups_uuid == '{guuid}' AND collections_uuid IN ('{uu_in_list}')"
       print(f"SQL: {cmd};")
       r = vw_sql(cmd)
       if len(r): print(f"ERROR: {cmd}; -> {r}")
@@ -292,6 +308,7 @@ def main(argv=None):
       if not args.permission:
         print(f"ERRPR: no permissions specified with: collection add\nTry using -p ...")
         sys.exit(1)
+      p = parse_permission(args.permission)
       print(f"adding collection(s) {str(args.names)} to group {guuid}")
       cmd = ""
       print(f"SQL: {cmd};")
