@@ -35,7 +35,8 @@ def parse_args(argv):
     )
     parser.add_argument( "-j", "--json", action="store_true", help="Emit machine-readable JSON output.")
     parser.add_argument( "-l", "--list", action="store_true", help="List all groups")
-    parser.add_argument( "-p", "--permission", metavar="PERM", help="permissions, when adding collections to a group: comma separated list of: readonly nopass. Default: full edit permissions")
+    parser.add_argument( "-c", "--create", action="store_true", help="create group if missing")
+    parser.add_argument( "-p", "--permission", metavar="PERM", help="permissions, when adding collections to a group: rw, ro,pw, ro,nopw")
     parser.add_argument("group", metavar="GROUP", nargs="?", help="Group name or group uuid to list or manipulate its users or collections")
     parser.add_argument("kind", metavar="user|col", nargs="?", choices=("u", "user", "users", "c", "col", "coll", "collection", "collections", "l", "list"), help="either 'users' or 'collections'.")
     parser.add_argument("cmd", metavar="add|del", nargs="?", choices=("list", "add", "del"), help="Add or delete users/collections.")
@@ -245,6 +246,25 @@ def collection_lookup(col_list, name):
   return r
 
 
+def assert_group(name):
+  if is_uuid(name):
+    print(f"ERROR: cannot use --create with a group uuid. Group name needed.")
+    sys.exit(1)
+  # INSERT OR IGNORE is not sufficient. Duplicate names are apparently permitted.grrr. Must check explicitly.
+  grp = vw_sql(f"SELECT uuid FROM groups WHERE name == '{name}'") 
+  if len(grp): 
+    print(f"OK: group {name} already exists")
+    return
+
+  org = vw_sql("SELECT uuid FROM organizations") 
+  guuid = str(uuid.uuid4())
+  cmd = f"INSERT INTO groups (uuid, organizations_uuid, name, access_all, creation_date, revision_date) VALUES ('{guuid}', '{org[0]['uuid']}', '{name}', 0, datetime('now'), datetime('now'))";
+  print(f"SQL: {cmd};")
+  r = vw_sql(cmd)
+  if len(r): print(f"ERROR: {cmd}; -> {r}")
+  return
+
+
 def main(argv=None):
   args = parse_args(argv)
 
@@ -254,6 +274,8 @@ def main(argv=None):
     return
 
   # else
+  if args.create: assert_group(args.group)
+
   guuid = group_uuid(args.group)
   if not guuid:
     print(f"ERROR: cannot find group name '{args.group}'")
