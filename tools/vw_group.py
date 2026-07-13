@@ -24,6 +24,8 @@ sqlite_db_path = os.environ.get("VW_DB_PATH", "vaultwarden/data/db.sqlite3")
 sqlite_cmd     = [ "ssh", server_ssh, "sqlite3", "-json", sqlite_db_path ]
 bw_cli         = os.environ.get("VW_BW_TOOL", "bw")
 
+verbose = 1     # 0, 1, 2 babble more ore less while working.
+
 #!/usr/bin/env python3
 import argparse
 
@@ -53,7 +55,7 @@ def parse_args(argv):
       args.list=True
 
     if args.permission and (args.cmd != "add" or args.kind not in ("c", "col", "coll", "collection")):
-      print(f"ERROR: permissions specified: {args.permission} - that only works with: <group> collecion add ...")
+      print(f"ERROR: permissions specified: {args.permission} - that only works with: <group> collecion add ...", file=sys.stderr)
       sys.exit(1)
 
     return args
@@ -73,7 +75,7 @@ def parse_permission(p):
   if "pw"   in a: r['hide_passwords'] = 0
   if "nopw" in a: r['hide_passwords'] = 1
   if len(r) != 3:
-    print(f"ERROR: permission: use one of: 'rw', 'ro,pw', 'ro,nopw', 'mgr'")
+    print(f"ERROR: permission '{p}': use one of: 'rw', 'ro,pw', 'ro,nopw', 'mgr'", file=sys.stderr)
     sys.exit(1)
 
   return (r['read_only'], r['hide_passwords'], r['manage'])
@@ -81,7 +83,7 @@ def parse_permission(p):
 
 def vw_sql(query):
     if not server_ssh:
-        print(f"{sys.argv[0]}: ERROR: env variable VW_SERVER_SSH is not defined")
+        print(f"{sys.argv[0]}: ERROR: env variable VW_SERVER_SSH is not defined", file=sys.stderr)
         sys.exit(1)
     # FIXME: we guard against shell, but we are probably prone to SQL injection.
     proc = subprocess.run( sqlite_cmd + [shlex.quote(query)], check=True, stdout=subprocess.PIPE, universal_newlines=True)
@@ -91,12 +93,12 @@ def vw_sql(query):
 def vw_cli(cmd):
     vw_session = os.environ.get("VW_SESSION")
     if not vw_session:
-        print(f"{sys.argv[0]}: ERROR: env variable VW_SESSION is not defined")
+        print(f"{sys.argv[0]}: ERROR: env variable VW_SESSION is not defined", file=sys.stderr)
         sys.exit(1)
 
     vw_cli_home = os.environ.get("VW_CLI_HOME")
     if not vw_cli_home:
-        print(f"{sys.argv[0]}: ERROR: env variable VW_CLI_HOME is not defined")
+        print(f"{sys.argv[0]}: ERROR: env variable VW_CLI_HOME is not defined", file=sys.stderr)
         sys.exit(1)
 
     env = os.environ.copy()
@@ -105,40 +107,6 @@ def vw_cli(cmd):
 
     proc = subprocess.run(cli_cmd, env=env, check=True, stdout=subprocess.PIPE, universal_newlines=True)
     return json.loads(proc.stdout)
-
-
-def cmd_list_all():
-  # print(user_email2uuid)
-  # print(user_orguuid2groups)
-  # print(collection_name2uuid.keys())
-  
-  for user_email in user_email2uuid.keys():
-    user_uuid = user_email2uuid[user_email]
-    user_name = user_uuid2name[user_uuid]
-    if user_name == user_email:
-      user_print = user_email
-    else:
-      user_print = f"{user_name} <{user_email}>"
-  
-    o = user_uuid2orguuid.get(user_uuid)
-    if not o:
-      print(f"user {user_print} not found in sqlite table users_organizations")
-      next
-  
-    gl = user_orguuid2groups.get(o)
-    if not gl:
-      print(f"user {user_print} orguuid {o} not found in sqlite table groups_users")
-      next
-  
-    # list all groups for this user
-    print(f"groups of {user_print}:")
-    for g in gl:
-      print(f"\t{g} {group_byuuid[g]['name']}")
-      # list all collections for this user group
-      if g in group_uuid2colls:
-        for c in group_uuid2colls[g]:
-          # print(f"\t\t{c['collections_uuid']} ro={c['read_only']} h={c['hide_passwords']} {collections_uuid.get(c['collections_uuid'], '-?-')}")
-          print(f"\t\t{c['collections_uuid']} {'ro' if c['read_only'] else 'rw' } {'nop' if c['hide_passwords'] else '   '} {collection_uuid2name.get(c['collections_uuid'], '('+c['collections_uuid']+')' )}")
 
 
 def is_uuid(text):
@@ -169,7 +137,7 @@ def cmd_list_groups(args):
 
 def cmd_list_collections(args, guuid):
       print(f"Collections:")
-      collection_uuid_list = vw_sql(f"SELECT collections_uuid, read_only, hide_passwords FROM collections_groups WHERE groups_uuid == '{guuid}'")
+      collection_uuid_list = vw_sql(f"SELECT collections_uuid, read_only, hide_passwords, manage FROM collections_groups WHERE groups_uuid == '{guuid}'")
       collection_name_list = vw_cli(["list", "collections"])
       collection_uuid2name = { item['id']: item['name'] for item in collection_name_list }
       if args.json:
@@ -179,7 +147,7 @@ def cmd_list_collections(args, guuid):
       else:
         for c in collection_uuid_list:
           cu = c['collections_uuid']
-          print(f"\t{cu} ro={c['read_only']} pw={1-c['hide_passwords']} '{collection_uuid2name.get(cu, '-?-')}'")
+          print(f"\t{cu} ro={c['read_only']} pw={1-c['hide_passwords']} mgr={c['manage']} '{collection_uuid2name.get(cu, '-?-')}'")
 
 
 def cmd_list_users(args, guuid):
@@ -202,7 +170,7 @@ def user_lookup_all(names):
   for name in names:
     uu = user_lookup(user_list, name)
     if not len(uu):
-      return None, f"user {name} not found"
+      return None, f"user not found: {name}"
     r.extend(uu)
   return r, None
 
@@ -233,7 +201,7 @@ def collection_lookup_all(names):
   for name in names:
     uu = collection_lookup(collection_name_list, name)
     if not len(uu):
-      return None, f"collection {name} not found"
+      return None, f"collection not found: {name}"
     r.extend(uu)
   return r, None
 
@@ -252,18 +220,18 @@ def collection_lookup(col_list, name):
 
 def assert_group(name):
   if is_uuid(name):
-    print(f"ERROR: cannot use --create with a group uuid. Group name needed.")
+    print(f"ERROR: cannot use --create with a group uuid. Group name needed.", file=sys.stderr)
     sys.exit(1)
   # INSERT OR IGNORE is not sufficient. Duplicate names are apparently permitted.grrr. Must check explicitly.
   grp = vw_sql(f"SELECT uuid FROM groups WHERE name == '{name}'") 
   if len(grp): 
-    print(f"OK: group {name} already exists")
+    if verbose: print(f"OK: group {name} already exists")
     return
 
   org = vw_sql("SELECT uuid FROM organizations") 
   guuid = str(uuid.uuid4())
   cmd = f"INSERT INTO groups (uuid, organizations_uuid, name, access_all, creation_date, revision_date) VALUES ('{guuid}', '{org[0]['uuid']}', '{name}', 0, datetime('now'), datetime('now'))";
-  print(f"SQL: {cmd};")
+  if verbose > 1: print(f"SQL: {cmd};")
   r = vw_sql(cmd)
   if len(r): print(f"ERROR: {cmd}; -> {r}")
   return
@@ -272,7 +240,7 @@ def assert_group(name):
 def main(argv=None):
   args = parse_args(argv)
 
-  print(args, file=sys.stderr)
+  if verbose > 1: print(args, file=sys.stderr)
   if not args.group:
     cmd_list_groups(args)
     return
@@ -282,7 +250,7 @@ def main(argv=None):
 
   guuid = group_uuid(args.group)
   if not guuid:
-    print(f"ERROR: cannot find group name '{args.group}'")
+    print(f"ERROR: cannot find group name '{args.group}'", file=sys.stderr)
     sys.exit(1)
   print(f"Group: uuid={guuid}")
 
@@ -296,51 +264,60 @@ def main(argv=None):
 
   if args.kind.startswith('u'):
     uu, err = user_lookup_all(args.names)
+    if err:
+      print(f"ERROR: {err}")
+      sys.exit(1)
+      
     ouu = map_user_uuid2orguuid(uu)
-    print([uu, ouu, err])
+    if verbose > 1: print([uu, ouu, err], file=sys.stderr)
 
     if args.cmd == "del":
-      print(f"deleting user(s) {str(args.names)} from group {guuid}")
+      if verbose: print(f"deleting user(s) {str(args.names)} from group {args.group}", file=sys.stderr)
       ouu_in_list = "', '".join(ouu)
       cmd = f"DELETE FROM groups_users WHERE groups_uuid == '{guuid}' AND users_organizations_uuid IN ('{ouu_in_list}')"
-      print(f"SQL: {cmd};")
+      if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
       r = vw_sql(cmd)
-      if len(r): print(f"ERROR: {cmd}; -> {r}")
+      if len(r): print(f"ERROR: {cmd}; -> {r}", file=sys.stderr)
       return
 
     if args.cmd == "add":
-      # sqlite supports multi value inserts:
+      # sqlite supports multi value inserts, e.g.:
       # INSERT INTO employees (name, salary) VALUES ('Bob Wilson', 45000), ('Carol White', 60000);
       val_list = [f"('{guuid}', '{u}')" for u in ouu]
+      if verbose: print(f"adding user(s) {str(args.names)} to group {args.group}", file=sys.stderr)
       cmd = f"INSERT OR IGNORE INTO groups_users (groups_uuid, users_organizations_uuid) VALUES {', '.join(val_list)}"
-      print(f"SQL: {cmd};")
+      if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
       r = vw_sql(cmd)
-      if len(r): print(f"ERROR: {r}")
+      if len(r): print(f"ERROR: {r}", file=sys.stderr)
       return
 
   if args.kind.startswith('c'):
     uu, err = collection_lookup_all(args.names)
+    if err:
+      print(f"ERROR: {err}")
+      sys.exit(1)
+
     uu_in_list = "', '".join(uu)
-    print(uu, err)
+    if verbose > 1: print(uu, err, file=sys.stderr)
     if args.cmd == "del":
-      print(f"deleting collection(s) {str(args.names)} from group {guuid}")
+      if verbose: print(f"deleting collection(s) {str(args.names)} from group {args.group}", file=sys.stderr)
       cmd = f"DELETE FROM collections_groups WHERE groups_uuid == '{guuid}' AND collections_uuid IN ('{uu_in_list}')"
-      print(f"SQL: {cmd};")
+      if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
       r = vw_sql(cmd)
-      if len(r): print(f"ERROR: {cmd}; -> {r}")
+      if len(r): print(f"ERROR: {cmd}; -> {r}", file=sys.stderr)
       return
 
     if args.cmd == "add":
       if not args.permission:
-        print(f"ERRPR: no permissions specified with: collection add\nTry using -p ...")
+        print(f"ERRPR: no permissions specified with: collection add\nTry using -p ...", file=sys.stderr)
         sys.exit(1)
       r,h,m = parse_permission(args.permission)
       val_list = [f"('{guuid}', '{c}', '{r}', '{h}', '{m}')" for c in uu]
-      print(f"adding collection(s) {str(args.names)} to group {guuid}")
+      if verbose: print(f"adding collection(s) {str(args.names)} to group {args.group} ({args.permission})", file=sys.stderr)
       cmd = f"INSERT OR IGNORE INTO collections_groups (groups_uuid, collections_uuid, read_only, hide_passwords, manage) VALUES {', '.join(val_list)}"
-      print(f"SQL: {cmd};")
+      if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
       r = vw_sql(cmd)
-      if len(r): print(f"ERROR: {cmd}; -> {r}")
+      if len(r): print(f"ERROR: {cmd}; -> {r}", file=sys.stderr)
       return
 
   print("not impl.")    # anything else
@@ -372,8 +349,6 @@ def main(argv=None):
 #       group_uuid2colls[g] = [ item ]
 #     else:
 #       group_uuid2colls[g].append(item)
-# 
-#   cmd_list_all()
 
 
 if __name__ == "__main__":
