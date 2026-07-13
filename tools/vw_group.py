@@ -36,7 +36,7 @@ def parse_args(argv):
     parser.add_argument( "-j", "--json", action="store_true", help="Emit machine-readable JSON output.")
     parser.add_argument( "-l", "--list", action="store_true", help="List all groups")
     parser.add_argument( "-c", "--create", action="store_true", help="create group if missing")
-    parser.add_argument( "-p", "--permission", metavar="PERM", help="permissions, when adding collections to a group: rw, ro,pw, ro,nopw")
+    parser.add_argument( "-p", "--permission", metavar="PERM", help="permissions, when adding collections to a group: rw, ro,pw, ro,nopw, mgr")
     parser.add_argument("group", metavar="GROUP", nargs="?", help="Group name or group uuid to list or manipulate its users or collections")
     parser.add_argument("kind", metavar="user|col", nargs="?", choices=("u", "user", "users", "c", "col", "coll", "collection", "collections", "l", "list"), help="either 'users' or 'collections'.")
     parser.add_argument("cmd", metavar="add|del", nargs="?", choices=("list", "add", "del"), help="Add or delete users/collections.")
@@ -61,18 +61,22 @@ def parse_args(argv):
 
 def parse_permission(p):
   a = p.split(',')
-  r = {}
+  r = { 'manage': 0 }
+  if "mgr"  in a:
+    r['manage'] = 1
+    r['read_only'] = 0
+    r['hide_passwords'] = 0
   if "rw"   in a:
     r['read_only'] = 0
     r['hide_passwords'] = 0
   if "ro"   in a: r['read_only'] = 1
   if "pw"   in a: r['hide_passwords'] = 0
   if "nopw" in a: r['hide_passwords'] = 1
-  if len(r) != 2:
-    print(f"ERROR: permission: use one of: 'rw', 'ro,pw', 'ro,nopw'")
+  if len(r) != 3:
+    print(f"ERROR: permission: use one of: 'rw', 'ro,pw', 'ro,nopw', 'mgr'")
     sys.exit(1)
 
-  return (r['read_only'], r['hide_passwords'])
+  return (r['read_only'], r['hide_passwords'], r['manage'])
 
 
 def vw_sql(query):
@@ -330,10 +334,10 @@ def main(argv=None):
       if not args.permission:
         print(f"ERRPR: no permissions specified with: collection add\nTry using -p ...")
         sys.exit(1)
-      r,h = parse_permission(args.permission)
-      val_list = [f"('{guuid}', '{c}', '{r}', '{h}')" for c in uu]
+      r,h,m = parse_permission(args.permission)
+      val_list = [f"('{guuid}', '{c}', '{r}', '{h}', '{m}')" for c in uu]
       print(f"adding collection(s) {str(args.names)} to group {guuid}")
-      cmd = f"INSERT OR IGNORE INTO collections_groups (groups_uuid, collections_uuid, read_only, hide_passwords) VALUES {', '.join(val_list)}"
+      cmd = f"INSERT OR IGNORE INTO collections_groups (groups_uuid, collections_uuid, read_only, hide_passwords, manage) VALUES {', '.join(val_list)}"
       print(f"SQL: {cmd};")
       r = vw_sql(cmd)
       if len(r): print(f"ERROR: {cmd}; -> {r}")
