@@ -1,6 +1,6 @@
 #! /usr/bin/python3
 #
-# vw_group.py - list, and edit user groups and their permissions.
+# vw_adm.py - list, and edit user groups and their permissions. Add or delete users.
 #
 # This uses a mixture of client api and sql access.
 # - the client api misses info about user groups
@@ -32,33 +32,53 @@ import argparse
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        prog="vw_group",
-        description="Manage VaultWarden groups, their members and collection permissions."
+        prog="vw_adm",
+        description="Manage VaultWarden groups, their members and collection permissions. Also some basic user operations."
     )
     parser.add_argument( "-j", "--json", action="store_true", help="Emit machine-readable JSON output.")
     parser.add_argument( "-l", "--list", action="store_true", help="List all groups")
     parser.add_argument( "-c", "--create", action="store_true", help="create group if missing")
     parser.add_argument( "-p", "--permission", metavar="PERM", help="permissions, when adding collections to a group: rw, ro,pw, ro,nopw, mgr")
-    parser.add_argument("group", metavar="GROUP", nargs="?", help="Group name or group uuid to list or manipulate its users or collections")
-    parser.add_argument("kind", metavar="user|col", nargs="?", choices=("u", "user", "users", "c", "col", "coll", "collection", "collections", "l", "list"), help="either 'users' or 'collections'.")
-    parser.add_argument("cmd", metavar="add|del", nargs="?", choices=("list", "add", "del"), help="Add or delete users/collections.")
-    parser.add_argument("names", metavar="NAMES", nargs="*", help="one or more names (or emails or uuids).")
+    subparsers = parser.add_subparsers(dest="object")
+
+    group_parser = subparsers.add_parser("group", aliases=["g"], help="Group operations. Try: group --help for details")
+    group_parser.add_argument("group", metavar="GROUP", nargs="?", help="Group name or group uuid to list or manipulate its users or collections")
+    group_parser.add_argument("kind", metavar="user|col", nargs="?", choices=("u", "user", "users", "c", "col", "coll", "collection", "collections", "l", "list"), help="either 'users' or 'collections'.")
+    group_parser.add_argument("cmd", metavar="add|del", nargs="?", choices=("list", "add", "del"), help="Add or delete users/collections.")
+    group_parser.add_argument("names", metavar="NAMES", nargs="*", help="one or more names (or emails or uuids).")
+
+    user_parser = subparsers.add_parser("user", aliases=["u"], help="User operations. Try: user --help for details")
+    user_parser.add_argument("cmd", metavar="add|del|list", choices=("add", "del", "list"))
+    user_parser.add_argument("email", metavar="EMAIL", nargs="?", help="E-Mail address or uuid to list or manipulate")
+    user_parser.add_argument("names", metavar="NAMES", nargs="*", help="optional: Firstname Lastname ...")
 
     args = parser.parse_args(argv)
 
-    ## some business logic
-    # if not args.groups: args.list=True
-    if args.kind in (None, "l", "list"):
-      args.kind="all"
-      args.list=True
-    if args.cmd in (None, "l", "list"):
-      args.list=True
+    if args.object is None:     # add_subparsers(..., required=True) in modern python.
+      parser.print_help()
+      parser.exit(2)
 
-    if args.permission and (args.cmd != "add" or args.kind not in ("c", "col", "coll", "collection")):
-      print(f"ERROR: permissions specified: {args.permission} - that only works with: <group> collecion add ...", file=sys.stderr)
-      sys.exit(1)
+    elif args.object.startswith("g"):
+      ## some business logic for groups
+      # if not args.groups: args.list=True
+      if args.kind in (None, "l", "list"):
+        args.kind="all"
+        args.list=True
+      if args.cmd in (None, "l", "list"):
+        args.list=True
 
-    return args
+      if args.permission and (args.cmd != "add" or args.kind not in ("c", "col", "coll", "collection")):
+        print(f"ERROR: permissions specified: {args.permission} - that only works with: <group> collecion add ...", file=sys.stderr)
+        sys.exit(1)
+
+    elif args.object.startswith("u"):
+        pass
+
+    else:
+        print(f"ERROR: object category {args.object} unknown. Try: group or user")
+        sys.exit(1)
+
+    return args, user_parser, group_parser
 
 
 def parse_permission(p):
@@ -135,7 +155,7 @@ def cmd_list_groups(args):
     return
 
 
-def cmd_list_collections(args, guuid):
+def cmd_list_group_collections(args, guuid):
       print(f"Collections:")
       collection_uuid_list = vw_sql(f"SELECT collections_uuid, read_only, hide_passwords, manage FROM collections_groups WHERE groups_uuid == '{guuid}'")
       collection_name_list = vw_cli(["list", "collections"])
@@ -150,7 +170,7 @@ def cmd_list_collections(args, guuid):
           print(f"\t{cu} ro={c['read_only']} pw={1-c['hide_passwords']} mgr={c['manage']} '{collection_uuid2name.get(cu, '-?-')}'")
 
 
-def cmd_list_users(args, guuid):
+def cmd_list_group_users(args, guuid):
       print(f"Users:")
       orguser_list  = vw_sql(f"SELECT users_organizations_uuid FROM groups_users WHERE groups_uuid == '{guuid}'")
       ou_in_list = "', '".join([x["users_organizations_uuid"] for x in orguser_list])
@@ -236,11 +256,41 @@ def assert_group(name):
   if len(r): print(f"ERROR: {cmd}; -> {r}")
   return
 
+####
+
+def cmd_user_add(email, username):
+  if username == "": username = email
+  print(f"useradd <{email}> {username}")
+  u = vw_sql(f"SELECT uuid FROM users WHERE email == '{email}'")
+  if len(u) > 0:
+    print(f"OK: user <{email}> already exists. uuid={u[0]['uuid']}")
+    return
+  print("not impl.", email, username)
+  return
+
+
+def user_ops(user_parser, args):
+  if verbose > 0: print("user_ops:", args, file=sys.stderr)
+  # ./vw_adm.py user add juergen@fabmail.org Jürgen Weigert
+  # -> (cmd='add', create=False, email='juergen@fabmail.org', json=False, list=False, names=['Jürgen', 'Weigert'], object='u', permission=None)
+  if args.cmd == "add":
+    if args.email is None or not "@" in args.email:
+      print(f"ERROR: user add needs an email address. not {args.email}", file=sys.stderr)
+      user_parser.print_help()
+      user_parser.exit(3)
+
+    cmd_user_add(args.email, " ".join(args.names))
+
 
 def main(argv=None):
-  args = parse_args(argv)
+  args, user_parser, group_parser = parse_args(argv)
 
   if verbose > 1: print(args, file=sys.stderr)
+
+  if args.object.startswith("u"):
+    user_ops(user_parser, args)
+    return
+
   if not args.group:
     cmd_list_groups(args)
     return
@@ -256,10 +306,10 @@ def main(argv=None):
 
   if args.list:
     if args.kind == "all" or args.kind.startswith('u'):
-      cmd_list_users(args, guuid)
+      cmd_list_group_users(args, guuid)
 
     if args.kind == "all" or args.kind.startswith('c'):
-      cmd_list_collections(args, guuid)
+      cmd_list_group_collections(args, guuid)
     return
 
   if args.kind.startswith('u'):
