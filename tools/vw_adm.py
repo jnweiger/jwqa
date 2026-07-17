@@ -15,7 +15,7 @@
 # CAUTION, the sqlite db seems to be not locked, when vautwarden runs. We just apply changes to the db
 #   without any preparation. It is unclear, if this is really safe while the server runs. It seems so.
 
-import sys, os, json, subprocess, shlex
+import sys, os, re, json, subprocess, shlex
 import argparse, uuid, requests
 
 
@@ -47,6 +47,8 @@ def parse_args(argv):
     group_parser.add_argument("names", metavar="NAMES", nargs="*", help="one or more names (or emails or uuids).")
 
     user_parser = subparsers.add_parser("user", aliases=["u"], help="User operations. Try: user --help for details")
+    user_parser.add_argument( "--type", choices=("0", "owner", "1", "admin", "2", "user", "3", "Manager", "4", "custom"), help="Used with user add: Status 0=owner, 1=admin, 2=user, 3=manager, 4=custom; default: user")
+    user_parser.add_argument( "-i", "--inviter-email", "--inviter", metavar="INVITER", help="Used with user add. Default: current VW_SESSION owner")
     user_parser.add_argument("cmd", metavar="add|list|invite|del", choices=("add", "del", "list", "invite", "confirm"))
     user_parser.add_argument("email", metavar="EMAIL", nargs="?", help="E-Mail address or uuid to list or manipulate")
     user_parser.add_argument("names", metavar="NAMES", nargs="*", help="optional: Firstname Lastname ...")
@@ -105,7 +107,7 @@ def vw_sql(query):
         print(f"{sys.argv[0]}: ERROR: env variable VW_SERVER_SSH is not defined", file=sys.stderr)
         sys.exit(1)
     # FIXME: we guard against shell, but we are probably prone to SQL injection.
-    proc = subprocess.run( sqlite_cmd + [shlex.quote(query)], check=True, stdout=subprocess.PIPE, universal_newlines=True)
+    proc = subprocess.run( sqlite_cmd + [shlex.quote(query)], check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, universal_newlines=True)
     return json.loads(proc.stdout or "[]")
 
 
@@ -124,7 +126,7 @@ def vw_cli(cmd):
     env["HOME"] = vw_cli_home
     cli_cmd = [bw_cli, f"--session={vw_session}"] + list(cmd)
 
-    proc = subprocess.run(cli_cmd, env=env, check=True, stdout=subprocess.PIPE, universal_newlines=True)
+    proc = subprocess.run(cli_cmd, env=env, check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, universal_newlines=True)
     return json.loads(proc.stdout)
 
 
@@ -212,7 +214,11 @@ def map_user_uuid2orguuid(uu_list):
   # CAUTION: This probably messes up when we have multiple organizations
   orguser_list = vw_sql("SELECT uuid, user_uuid FROM users_organizations")
   user_uuid2orguuid  = { item['user_uuid']: item['uuid'] for item in orguser_list }
-  return [user_uuid2orguuid[uu] for uu in uu_list]
+  ouu = []
+  for uu in uu_list:
+    if uu in user_uuid2orguuid:
+      ouu.append(user_uuid2orguuid[uu])
+  return ouu
 
 
 def collection_lookup_all(names):
@@ -258,7 +264,7 @@ def assert_group(name):
 
 ####
 
-def cmd_user_add(email, username):
+def cmd_user_add(email, username, atype=2, inviter=None):
   if username == "": username = email
   print(f"useradd <{email}> {username}")
   u = vw_sql(f"SELECT uuid FROM users WHERE email == '{email}'")
@@ -279,9 +285,12 @@ def cmd_user_add(email, username):
   r = vw_sql(cmd)
   if len(r): print(f"ERROR: {r}", file=sys.stderr)
 
-  status = 0    # -1=Revoked, 0=Invited, 1=Accepted, 2=Confirmed
-  atype = 2     # 0=Owner, 1=Admin, 2=User, 3=Manager, 4=Custom
-  inviter = "vw_adm+" + cli_status.get("userEmail", '')
+  status = 0                      # -1=Revoked, 0=Invited, 1=Accepted, 2=Confirmed
+  if atype is None: atype = 2     # 0=Owner, 1=Admin, 2=User, 3=Manager, 4=Custom
+  if inviter is None:
+    inviter = cli_status.get("userEmail", '')
+    inviter = re.sub('@', '+vw_adm@', inviter)    # This email rather should work. Comment out, if the +suffix does not work for you.
+
   cols = "uuid, user_uuid, org_uuid, access_all, akey, status, atype, invited_by_email"
   vals = f"'{member_uuid}', '{user_uuid}', '{org[0]['uuid']}', 0, '', {status}, {atype}, '{inviter}'"
   cmd = f"INSERT INTO users_organizations ({cols}) VALUES ({vals})"
@@ -292,11 +301,14 @@ def cmd_user_add(email, username):
   return
 
 
-def api_org_user_invite(base_url, org_uuid, user_uuid):
+def api_org_user_invite(base_url, org_uuid, user_uuid, inviter):
   # curl 'https://vw-test.heinlein-support.de/api/organizations/9051a55c-e6d0-45bf-843e-7add02ef88b0/users/d2b52a02-9d41-4578-ad5b-1d4ed8364c5d/reinvite'   -X POST   -H "authorization: Bearer $VW_BEARER_TOKEN"
+  # FIXME: do we have the token here?  grep accessToken "$VW_CLI_HOME/.config/Bitwarden CLI/data.json"
   token = os.environ.get("VW_BEARER_TOKEN")    # from
   if not token:
-    print("VW_BEARER_TOKEN environment variable is not set. Open Network Tab in browser console, right click a request and try 'Copy as Curl' ", file=sys.stderr)
+    print("VW_BEARER_TOKEN environment variable is not set.", file=sys.stderr)
+    print("\t try: grep accessToken \"$VW_CLI_HOME/.config/Bitwarden CLI/data.json\"", file=sys.stderr)
+    print("\t try: Open Network Tab in browser console, right click a request and try 'Copy as Curl' ", file=sys.stderr)
     return
   url = f"{base_url}/api/organizations/{org_uuid}/users/{user_uuid}/reinvite"
   headers = { "Authorization": f"Bearer {token}" }
@@ -333,7 +345,7 @@ def api_org_user_confirm(base_url, org_uuid, user_uuid):
 #   return response
 
 
-def cmd_user_invite(email):
+def cmd_user_invite(email, inviter=None):
   uu, err = user_lookup_all([email])
   if err:
     print(f"ERROR: {err} - try: user add ... ")
@@ -341,7 +353,7 @@ def cmd_user_invite(email):
   ouu = map_user_uuid2orguuid(uu)
   org = vw_sql("SELECT uuid FROM organizations")
   cli_status = vw_cli(["status"])
-  api_org_user_invite(cli_status['serverUrl'], org[0]['uuid'], ouu[0])
+  api_org_user_invite(cli_status['serverUrl'], org[0]['uuid'], ouu[0], inviter)
 
 
 def cmd_user_delete(email):
@@ -350,20 +362,21 @@ def cmd_user_delete(email):
     print(f"ERROR: {err} - try: user add ... ")
     sys.exit(1)
   ouu = map_user_uuid2orguuid(uu)
-  cmd = f"DELETE FROM groups_users WHERE users_organizations_uuid == '{ouu[0]}'"
-  if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
-  r = vw_sql(cmd)
-  if len(r): print(f"ERROR: {r}", file=sys.stderr)
+  if len(ouu):
+    cmd = f"DELETE FROM groups_users WHERE users_organizations_uuid == '{ouu[0]}'"
+    if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
+    r = vw_sql(cmd)
+    if len(r): print(f"ERROR: {r}", file=sys.stderr)
 
-  cmd = f"DELETE FROM users_collections WHERE user_uuid == '{ouu[0]}'"
-  if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
-  r = vw_sql(cmd)
-  if len(r): print(f"ERROR: {r}", file=sys.stderr)
+    cmd = f"DELETE FROM users_collections WHERE user_uuid == '{ouu[0]}'"
+    if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
+    r = vw_sql(cmd)
+    if len(r): print(f"ERROR: {r}", file=sys.stderr)
 
-  cmd = f"DELETE FROM users_organizations WHERE uuid == '{ouu[0]}'"
-  if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
-  r = vw_sql(cmd)
-  if len(r): print(f"ERROR: {r}", file=sys.stderr)
+    cmd = f"DELETE FROM users_organizations WHERE uuid == '{ouu[0]}'"
+    if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
+    r = vw_sql(cmd)
+    if len(r): print(f"ERROR: {r}", file=sys.stderr)
 
   cmd = f"DELETE FROM users WHERE uuid == '{uu[0]}'"
   if verbose > 1: print(f"SQL: {cmd};", file=sys.stderr)
@@ -382,13 +395,13 @@ def user_ops(user_parser, args):
       print(f"ERROR: user add needs an email address. not {args.email}", file=sys.stderr)
       user_parser.print_help()
       user_parser.exit(3)
-    return cmd_user_add(args.email, " ".join(args.names))
+    return cmd_user_add(args.email, " ".join(args.names), args.type, args.inviter_email)
 
   if args.cmd == "invite":
     if args.email is None:
       print(f"ERROR: specify email address of an added user", file=sys.stderr)
       sys.exit(1)
-    return cmd_user_invite(args.email)
+    return cmd_user_invite(args.email, args.inviter_email)
 
   if args.cmd == "del":
     if args.email is None:
@@ -398,17 +411,22 @@ def user_ops(user_parser, args):
 
   if args.cmd == "list":
     user_list = vw_sql(f"SELECT uuid, name, email FROM users")
-    orguser_list = vw_sql("SELECT uuid, user_uuid FROM users_organizations")
-    user_uuid2orguuid  = { item['user_uuid']: item['uuid'] for item in orguser_list }
+    orguser_list = vw_sql("SELECT uuid, user_uuid, access_all, atype, status, atype, invited_by_email FROM users_organizations")
+    user_uuid2orguser  = { item['user_uuid']: item for item in orguser_list }
     for u in user_list:
-      if u["uuid"] in user_uuid2orguuid:
-        u["member_uuid"] = user_uuid2orguuid[u["uuid"]]
+      if u["uuid"] in user_uuid2orguser:
+        ou = user_uuid2orguser[u["uuid"]]
+        u["member_uuid"] = ou['user_uuid']
+        u["access_all"]  = ou['access_all']
+        u["atype"]       = ou['atype']
+        u["status"]      = ou['status']
+        u["invited_by_email"] = ou['invited_by_email']
 
     if args.json:
       print(json.dumps(user_list))
     else:
       for u in user_list:
-        print(f"\t{u['uuid']} {u['name']} <{u['email']}>")
+        print(f"\t{u['uuid']} a={u.get('access_all','-')} t={u.get('atype','-')} s={u.get('status','-')} {u['name']} <{u['email']}>")
     return
 
   print(f"ERROR: user_ops(cmd={args.cmd}) not impl.", file=sys.stderr)
