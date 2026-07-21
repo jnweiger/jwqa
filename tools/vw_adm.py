@@ -49,6 +49,7 @@ def parse_args(argv):
     user_parser = subparsers.add_parser("user", aliases=["u"], help="User operations. Try: user --help for details")
     user_parser.add_argument( "--type", choices=("0", "owner", "1", "admin", "2", "user", "3", "Manager", "4", "custom"), help="Used with user add: Status 0=owner, 1=admin, 2=user, 3=manager, 4=custom; default: user")
     user_parser.add_argument( "-i", "--inviter-email", "--inviter", metavar="INVITER", help="Used with user add. Default: current VW_SESSION owner")
+    user_parser.add_argument( "-e", "--email-group", action="store_true", help="Print mapping table with user email addresses and group names (instead of normal user listing)")
     user_parser.add_argument("cmd", metavar="add|list|invite|del", choices=("add", "del", "list", "invite", "confirm"))
     user_parser.add_argument("email", metavar="EMAIL", nargs="?", help="E-Mail address or uuid to list or manipulate")
     user_parser.add_argument("names", metavar="NAMES", nargs="*", help="optional: Firstname Lastname ...")
@@ -413,6 +414,11 @@ def user_ops(user_parser, args):
     user_list = vw_sql(f"SELECT uuid, name, email FROM users")
     orguser_list = vw_sql("SELECT uuid, user_uuid, access_all, atype, status, atype, invited_by_email FROM users_organizations")
     user_uuid2orguser  = { item['user_uuid']: item for item in orguser_list }
+
+    if args.email_group:
+      user_email_group_table(args, orguser_list, user_list)
+      return
+
     for u in user_list:
       if u["uuid"] in user_uuid2orguser:
         ou = user_uuid2orguser[u["uuid"]]
@@ -430,6 +436,27 @@ def user_ops(user_parser, args):
     return
 
   print(f"ERROR: user_ops(cmd={args.cmd}) not impl.", file=sys.stderr)
+  return
+
+def user_email_group_table(args, orguser_list, user_list):
+  group_list = vw_sql("SELECT uuid, organizations_uuid, name, access_all FROM groups")
+  user_orguuid2uuid = { item['uuid']: item['user_uuid'] for item in orguser_list }
+  user_uuid2email   = { item['uuid']: item['email']     for item in user_list    }
+  group_uuid2name   = { item['uuid']: item['name']      for item in group_list   }
+
+  group_orguser_list = vw_sql("select groups_uuid, users_organizations_uuid from groups_users")
+  for item in group_orguser_list:
+    if item['users_organizations_uuid'] in user_orguuid2uuid:
+      item['user_uuid'] = user_orguuid2uuid[item['users_organizations_uuid']]
+      item['user_email'] = user_uuid2email[item['user_uuid']]
+    if item['groups_uuid'] in group_uuid2name:
+      item['group_name'] = group_uuid2name[item['groups_uuid']]
+
+  if args.json:
+    print(json.dumps(group_orguser_list))
+  else:
+    for item in group_orguser_list:
+      print(f"{shlex.quote(item.get('user_email', item['users_organizations_uuid']))}\t{shlex.quote(item.get('group_name', item['groups_uuid']))}")
   return
 
 
@@ -524,7 +551,6 @@ def main(argv=None):
   print("not impl.")    # anything else
 
 
-#   group_orguser_list    = vw_sql("select groups_uuid, users_organizations_uuid from groups_users")
 #   collection_group_list = vw_sql("select collections_uuid, groups_uuid, read_only, hide_passwords from collections_groups")
 #
 #   user_email2uuid    = { item['email']: item['uuid'] for item in user_list }
@@ -534,14 +560,6 @@ def main(argv=None):
 #
 #   collection_uuid2name = { item['id']: item['name'] for item in collection_list }
 #   collection_name2uuid = { item['name']: item['id'] for item in collection_list }
-#
-#   user_orguuid2groups = {}
-#   for item in group_orguser_list:
-#     u = item["users_organizations_uuid"]
-#     if u not in user_orguuid2groups:
-#       user_orguuid2groups[u] = [ item["groups_uuid"] ]
-#     else:
-#       user_orguuid2groups[u].append(item["groups_uuid"])
 #
 #   group_uuid2colls = {}
 #   for item in collection_group_list:
