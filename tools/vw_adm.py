@@ -147,13 +147,21 @@ def group_uuid(name_or_id):
   return group[0]["uuid"]
 
 
+def quoted_string(text):
+  # use shlex.quote, but never return an unqoted string.
+  text = shlex.quote(text)
+  if text[0] == '"' or text[0] == "'":
+    return text
+  return "'"+text+"'"
+
+
 def cmd_list_groups(args):
     group_list = vw_sql("SELECT uuid, organizations_uuid, name, access_all FROM groups")
     if args.json:
       print(json.dumps(group_list))
     else:
       for g in group_list:
-        print(f"{g['uuid']}\t{shlex.quote(g['name'])}")
+        print(f"{g['uuid']}\t{quoted_string(g['name'])}")
     return
 
 
@@ -456,7 +464,7 @@ def user_email_group_table(args, orguser_list, user_list):
     print(json.dumps(group_orguser_list))
   else:
     for item in group_orguser_list:
-      print(f"{shlex.quote(item.get('user_email', item['users_organizations_uuid']))}\t{shlex.quote(item.get('group_name', item['groups_uuid']))}")
+      print(f"{shlex.quote(item.get('user_email', item['users_organizations_uuid']))}\t{quoted_string(item.get('group_name', item['groups_uuid']))}")
   return
 
 
