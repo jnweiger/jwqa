@@ -47,28 +47,17 @@ def check_rclone():
 
 
 def parse_url_username(url: str) -> str | None:
-    """
-    Extract username from a URL like https://username@host/...
-    Returns None if no username is present.
-    """
-    if "://" not in url:
-        return None
-    _, rest = url.split("://", 1)
-    if "@" not in rest:
-        return None
-    user_host, _ = rest.split("@", 1)
-    return user_host.split(":", 1)[0] or None
-
-ef parse_url_username(url: str) -> str | None:
      """ 
      Extract username from a URL like https://username@host/...
-     Returns None if no username is present.
+     Returns None if no username is present. Returns the remaining url without username as second value.
      """     
+     if url is None:
+         return None, None
      if "://" not in url:
-         return None
+         return None, url
      proto, rest = url.split("://", 1)
      if "@" not in rest:
-         return None
+         return None, url
      user_host, rem = rest.split("@", 1)
      return user_host.split(":", 1)[0] or None, proto + '://' + rem
 
@@ -103,7 +92,7 @@ def get_spaces(oc_url: str, oc_user: str, oc_apptoken: str) -> list[dict[str, An
     return data.get("value", [])
 
 
-def print_spaces(spaces: list[dict[str, Any]], long_format: bool):
+def print_spaces(spaces: list[dict[str, Any]], long_format: bool = False, json_format: bool = False):
     """
     Print spaces in tabular form.
 
@@ -113,11 +102,14 @@ def print_spaces(spaces: list[dict[str, Any]], long_format: bool):
     With -l / --long:
       driveAlias  name  webDavUrl  size  remoteItem.driveAlias (as symlink target)
     """
+    if json_format:
+        print(json.dumps(spaces, sort_keys=True, indent=4))
+        return
+
     if long_format:
         header = [
             "driveAlias",
             "name",
-            "webDavUrl",
             "size",
             "remoteItem.driveAlias",
         ]
@@ -125,7 +117,6 @@ def print_spaces(spaces: list[dict[str, Any]], long_format: bool):
         header = [
             "driveAlias",
             "name",
-            "webDavUrl",
         ]
 
     col_widths = [len(h) for h in header]
@@ -153,15 +144,13 @@ def print_spaces(spaces: list[dict[str, Any]], long_format: bool):
             row = [
                 drive_alias,
                 name,
-                webdav_url,
-                str(size) if size is not None else "null",
+                str(size) if size is not None else "-",
                 ri_drive_alias,
             ]
         else:
             row = [
                 drive_alias,
                 name,
-                webdav_url,
             ]
 
         rows.append(row)
@@ -180,7 +169,7 @@ def print_spaces(spaces: list[dict[str, Any]], long_format: bool):
 
 
 def resolve_space_for_path(
-    path: str, spaces: list[dict[str, Any]]
+    spaces: list[dict[str, Any]], path: str
 ) -> tuple[dict[str, Any], str]:
     """
     Given a path like 'oc:/project/support_team/doc/subfolder',
@@ -190,13 +179,16 @@ def resolve_space_for_path(
     Returns (space_dict, remaining_path_in_space)
     where remaining_path_in_space is e.g. '/doc/subfolder'.
     """
-    if not path.startswith("oc:/"):
-        eprint("Path must start with 'oc:/'")
+    if not path.startswith("oc:"):
+        eprint("Path must start with 'oc:'")
         sys.exit(1)
+    if path.startswith("oc:/"):
+      rest = path[4:]  # remove 'oc:/'
+    else:
+      rest = path[3:]  # remove 'oc:'
 
-    rest = path[4:]  # remove 'oc:/'
     if not rest:
-        eprint("No path provided after 'oc:/'")
+        eprint("No path provided after 'oc:[/]'")
         sys.exit(1)
 
     parts = rest.split("/")
@@ -232,16 +224,7 @@ def resolve_space_for_path(
     return space, inner_path
 
 
-def rclone_copy(webdav_url: str, user: str, apptoken: str, src_path: str, dst: str):
-    """
-    Run:
-    rclone copy -P --stats-one-line --config /dev/null --max-depth 0 \\
-      --webdav-url WEBDAV_URL \\
-      --webdav-vendor opencloud \\
-      --webdav-user USER \\
-      --webdav-pass "$(rclone obscure TOKEN)" \\
-      :webdav:SRC_PATH DST
-    """
+def rclone_obscure(apptoken):
     try:
         obsc = subprocess.run(
             ["rclone", "obscure", apptoken],
@@ -252,26 +235,64 @@ def rclone_copy(webdav_url: str, user: str, apptoken: str, src_path: str, dst: s
     except subprocess.CalledProcessError as e:
         eprint("rclone obscure failed:", e.stderr.strip() or e)
         sys.exit(1)
+    return obsc.stdout.strip()
 
-    obscured_pass = obsc.stdout.strip()
+
+def rclone_list(webdav_url: str, user: str, apptoken: str, webdav_path: str, flags=None):
+    """
+    Run:
+    rclone ls --max-depth 1 --config /dev/null --webdav-url WEBDAV_URL \\
+      --webdav-vendor opencloud \\
+      --webdav-user USER --webdav-pass "$(rclone obscure TOKEN)" \\
+      :webdav:path
+
+    where WEBDAV_URL is the webdavurl from a space dict.
+    """
+    webdav_vendor = os.environ.get("OC_WEBDAV_VENDOR", "opencloud")
+    obscured_pass = rclone_obscure(apptoken)
+    cmd = [ "rclone", "lsjson", "--config", "/dev/null", "--max-depth", "0" if flags and flags.recursive else "1",
+        "--webdav-url", webdav_url, "--webdav-vendor", webdav_vendor, "--webdav-user", user,
+        "--webdav-pass", obscured_pass, f":webdav:{webdav_path}" ]
+    try:
+        ls = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        eprint("rclone ls failed:", e.stderr.strip() or e)
+        sys.exit(1)
+    try:
+        text = json.loads(ls.stdout)
+    except subprocess.CalledProcessError as e:
+        eprint("parsing json failed: from: rclone lsjson:", e.stderr.strip() or e)
+        sys.exit(1)
+
+    if flags and flags.json:
+        print(json.dumps(text, sort_keys=True, indent=4))
+    else:
+        for item in sorted(text, key=lambda x: x['Path']):
+            # {'Path': 'test.txt', 'Name': 'test.txt', 'Size': 140, 'MimeType': 'text/plain; charset=utf-8', 'ModTime': '2026-08-03T15:56:47Z', 'IsDir': False}
+            if flags and flags.long:
+              print(f"{item["ModTime"]} {item["Size"]:10} {"D" if item["IsDir"] else " "} {item["Path"]}{"/" if item["IsDir"] else ""}")
+            else:
+              print(f"{item["Path"]}{"/" if item["IsDir"] else ""}")
+
+
+def rclone_copy(webdav_url: str, user: str, apptoken: str, src_path: str, dst: str, recursive: bool = False):
+    """
+    Run:
+    rclone copy -P --stats-one-line --config /dev/null --max-depth 0 \\
+      --webdav-url WEBDAV_URL \\
+      --webdav-vendor opencloud \\
+      --webdav-user USER \\
+      --webdav-pass "$(rclone obscure TOKEN)" \\
+      :webdav:SRC_PATH DST
+    """
+    webdav_vendor = os.environ.get("OC_WEBDAV_VENDOR", "opencloud")
+    obscured_pass = rclone_obscure(apptoken)
 
     cmd = [
-        "rclone",
-        "copy",
-        "-P",
-        "--stats-one-line",
-        "--config",
-        "/dev/null",
-        "--max-depth",
-        "0",
-        "--webdav-url",
-        webdav_url,
-        "--webdav-vendor",
-        "opencloud",
-        "--webdav-user",
-        user,
-        "--webdav-pass",
-        obscured_pass,
+        "rclone", "copy", "-P", "--stats-one-line", "--config", "/dev/null",
+        "--max-depth", "0" if recursive else "1",
+        "--webdav-url", webdav_url, "--webdav-vendor", webdav_vendor,
+        "--webdav-user", user, "--webdav-pass", obscured_pass,
         f":webdav:{src_path}",
         dst,
     ]
@@ -297,15 +318,14 @@ def build_parser() -> argparse.ArgumentParser:
         "target",
         nargs="?",
         default=None,
-        help="Optional target: 'oc:' or a URL like https://username@oc.jwqa.de",
+        help="Optional target: 'oc:[spacename[/path...]]' or a URL like https://username@oc.example.com:9200[/...]",
     )
     ls_parser.add_argument(
         "-r",
         "--recursive",
         action="store_true",
         help=(
-            "Recursive listing. For spaces, this currently has no extra effect "
-            "since we always list all spaces; reserved for future per-space recursion."
+            "Recursive listing. For toplevel spaces listing, this has no effect, as spaces are flat."
         ),
     )
     ls_parser.add_argument(
@@ -313,6 +333,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--long",
         action="store_true",
         help="Long format: include size and symlink-style alias (remoteItem.driveAlias).",
+    )
+    ls_parser.add_argument(
+        "-j",
+        "--json",
+        action="store_true",
+        help="Output in rclone lsjson format",
     )
 
     # copy subcommand
@@ -335,53 +361,47 @@ def main():
 
     check_rclone()
 
-    oc_url = os.environ.get("OC_URL")
+    oc_user_env, oc_url = parse_url_username(os.environ.get("OC_URL"))
+    oc_user_env = os.environ.get("OC_USER", oc_user_env)    # explicit OC_USER env var takes precendce over embedded user in OC_URL
     oc_apptoken = os.environ.get("OC_APPTOKEN")
-    oc_user_env = os.environ.get("OC_USER")
-
-    # if not oc_url:
-    #     eprint("Environment variable OC_URL is missing")
-    #     sys.exit(1)
-    # if not oc_apptoken:
-    #     eprint("Environment variable OC_APPTOKEN is missing")
-    #     sys.exit(1)
 
     if args.command == "ls":
         target = args.target
 
         # Determine effective URL and username
-        if target is None:
-            # oc_cmd.py ls [-r] [-l]
-            oc_user = oc_user_env
-            effective_url = oc_url
-            if not oc_user:
-                eprint("Environment variable OC_USER is missing (no username in URL)")
-                sys.exit(1)
-        elif target == "oc:":
+        url_path=""
+        if target is None or target.startswith("oc:"):
             # oc_cmd.py ls oc: [-r] [-l]
+            if target and target[:3] == "oc:":
+              url_path = target
             oc_user = oc_user_env
-            effective_url = oc_url
+            target = oc_url
             if not oc_url:
                 eprint("Environment variable OC_URL is missing. Alternatively, specify the full server url instead of 'oc:'")
                 sys.exit(1)
             if not oc_user:
-                eprint("Environment variable OC_USER is missing (no username in URL)")
+                eprint("Environment variable OC_USER is missing (and no username in OC_URL)")
                 sys.exit(1)
         else:
             # oc_cmd.py ls https://username@oc.jwqa.de [-r] [-l]
-            effective_url = target
             url_user, new_target = parse_url_username(target)
             if url_user:
                 oc_user = url_user
                 target = new_target
             else:
-                oc_user = oc_user_env
+                oc_user = os.environ.get("OC_USER")
             if not oc_user:
                 eprint( "No username found in URL and OC_USER is not set in environment")
                 sys.exit(1)
 
-        spaces = get_spaces(effective_url, oc_user, oc_apptoken)
-        print_spaces(spaces, long_format=args.long)
+        spaces = get_spaces(target, oc_user, oc_apptoken)
+        if url_path in ("", "oc:", "oc:/"):
+          print_spaces(spaces, long_format=args.long, json_format=args.json)
+        else:
+          # print(f"{url_path}")
+          space, path = resolve_space_for_path(spaces, url_path)
+          # print(f"space {space}, path {path}")
+          rclone_list(space["root"]["webDavUrl"], oc_user, oc_apptoken, path, args)
 
     elif args.command == "copy":
         src_path = args.src
@@ -397,7 +417,7 @@ def main():
             sys.exit(1)
 
         spaces = get_spaces(oc_url, oc_user, oc_apptoken)
-        space, inner_path = resolve_space_for_path(src_path, spaces)
+        space, inner_path = resolve_space_for_path(spaces, src_path)
 
         webdav_url = space.get("root", {}).get("webDavUrl")
         if not webdav_url:
