@@ -10,6 +10,10 @@ Usage examples:
   oc_cmd.py ls -l          # long format with size and alias
   oc_cmd.py ls -rl         # recursive + long
   oc_cmd.py copy oc:/project/support_team/doc/subfolder .
+
+(C) 2026, j.weigert@heinlein-support.de - Distribute under GPLv2 or later.
+
+2026-10-06, jw:  v1.0:    ls and cp commands done.
 """
 
 from __future__ import annotations
@@ -24,20 +28,12 @@ import sys
 import urllib.error
 import urllib.request
 from typing import Any
+from pathlib import Path
 
+version="1.0"
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
-
-
-def check_env_vars():
-    required = ["OC_URL", "OC_APPTOKEN"]
-    missing = [v for v in required if not os.environ.get(v)]
-    if missing:
-        eprint(f"Missing required environment variables: {', '.join(missing)}")
-        sys.exit(1)
-    # OC_USER is optional if provided via URL username
-    return os.environ.get("OC_USER")
 
 
 def check_rclone():
@@ -47,10 +43,10 @@ def check_rclone():
 
 
 def parse_url_username(url: str) -> str | None:
-     """ 
+     """
      Extract username from a URL like https://username@host/...
      Returns None if no username is present. Returns the remaining url without username as second value.
-     """     
+     """
      if url is None:
          return None, None
      if "://" not in url:
@@ -92,7 +88,7 @@ def get_spaces(oc_url: str, oc_user: str, oc_apptoken: str) -> list[dict[str, An
     return data.get("value", [])
 
 
-def print_spaces(spaces: list[dict[str, Any]], long_format: bool = False, json_format: bool = False):
+def print_spaces(spaces: list[dict[str, Any]], prefix: str = "", long_format: bool = False, json_format: bool = False):
     """
     Print spaces in tabular form.
 
@@ -142,14 +138,14 @@ def print_spaces(spaces: list[dict[str, Any]], long_format: bool = False, json_f
 
         if long_format:
             row = [
-                drive_alias,
+                prefix+drive_alias,
                 name,
                 str(size) if size is not None else "-",
                 ri_drive_alias,
             ]
         else:
             row = [
-                drive_alias,
+                prefix+drive_alias,
                 name,
             ]
 
@@ -275,26 +271,35 @@ def rclone_list(webdav_url: str, user: str, apptoken: str, webdav_path: str, fla
               print(f"{item["Path"]}{"/" if item["IsDir"] else ""}")
 
 
-def rclone_copy(webdav_url: str, user: str, apptoken: str, src_path: str, dst: str, recursive: bool = False):
+def rclone_copy(webdav_url: str, user: str, apptoken: str, src: str, dst: str, recursive: bool = False, overwrite: bool = False):
     """
-    Run:
-    rclone copy -P --stats-one-line --config /dev/null --max-depth 0 \\
+    Runs:
+    rclone copy[to] -P --stats-one-line --config /dev/null --max-depth 0 \\
       --webdav-url WEBDAV_URL \\
       --webdav-vendor opencloud \\
       --webdav-user USER \\
       --webdav-pass "$(rclone obscure TOKEN)" \\
       :webdav:SRC_PATH DST
+
+    We use either copy or copyto, so that we can name a destination file explicitly.
     """
+    if not src.startswith(":webdav:") and not dst.startswith(":webdav:"):
+      eprint("rclone_copy: one of src or dst must start with :webdav:")
+      sys.exit(1)
+
     webdav_vendor = os.environ.get("OC_WEBDAV_VENDOR", "opencloud")
     obscured_pass = rclone_obscure(apptoken)
 
-    cmd = [
-        "rclone", "copy", "-P", "--stats-one-line", "--config", "/dev/null",
-        "--max-depth", "0" if recursive else "1",
+    cmd = [ "rclone", "copy", "--create-empty-src-dirs" ]
+    if overwrite:   # and Path(src).is_file():
+       cmd = [ "rclone", "copyto" ]
+
+    cmd += [
+        "-P", "--stats-one-line", "--config", "/dev/null",
+        "--max-depth", "-1" if recursive else "1",
         "--webdav-url", webdav_url, "--webdav-vendor", webdav_vendor,
         "--webdav-user", user, "--webdav-pass", obscured_pass,
-        f":webdav:{src_path}",
-        dst,
+        src, dst
     ]
 
     try:
@@ -308,7 +313,7 @@ def rclone_copy(webdav_url: str, user: str, apptoken: str, src_path: str, dst: s
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="oc_cmd",
-        description="OpenCloud CLI wrapper using rclone and the Graph API.",
+        description=f"oc_cmd version {version} - OpenCloud CLI wrapper using rclone and the Graph API.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -342,7 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # copy subcommand
-    copy_parser = subparsers.add_parser("copy", help="Copy from OpenCloud to local")
+    copy_parser = subparsers.add_parser("copy", aliases=["cp"], help="Copy from OpenCloud to local")
     copy_parser.add_argument(
         "src",
         help="Source path, e.g. oc:/project/support_team/doc/subfolder",
@@ -351,8 +356,45 @@ def build_parser() -> argparse.ArgumentParser:
         "dst",
         help="Destination path",
     )
-
+    copy_parser.add_argument(
+        "-r",
+        "--recursive",
+        action="store_true",
+        help="Recursive tree copy. No effect when source is a file."
+    )
+    copy_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Overwrite a file destiniation using 'rclone copyto'. Use this, if rclone refuses to copy a file to an existing destination file."
+    )
     return parser
+
+
+def oc_get(oc_url, user, apptoken, spaces, src, dst, recursive=False, overwrite=False):
+
+    space, inner_path = resolve_space_for_path(spaces, src)
+
+    webdav_url = space.get("root", {}).get("webDavUrl")
+    if not webdav_url:
+        eprint(f"Selected space '{space["name"]}' has no root.webDavUrl")
+        sys.exit(1)
+
+    webdav_url = webdav_url.rstrip("/")
+    rclone_copy(webdav_url, user, apptoken, ":webdav:"+inner_path, dst, recursive=recursive, overwrite=overwrite)
+
+
+def oc_put(oc_url, user, apptoken, spaces, src, dst, recursive=False, overwrite=False):
+
+    space, inner_path = resolve_space_for_path(spaces, dst)
+
+    webdav_url = space.get("root", {}).get("webDavUrl")
+    if not webdav_url:
+        eprint(f"Selected space '{space["name"]}' has no root.webDavUrl")
+        sys.exit(1)
+
+    webdav_url = webdav_url.rstrip("/")
+    rclone_copy(webdav_url, user, apptoken, src, ":webdav:"+inner_path, recursive=recursive, overwrite=overwrite)
 
 
 def main():
@@ -364,6 +406,9 @@ def main():
     oc_user_env, oc_url = parse_url_username(os.environ.get("OC_URL"))
     oc_user_env = os.environ.get("OC_USER", oc_user_env)    # explicit OC_USER env var takes precendce over embedded user in OC_URL
     oc_apptoken = os.environ.get("OC_APPTOKEN")
+    if not oc_apptoken:
+        eprint(f"Environment variable OC_APPTOKEN is missing. Create an apptoken if needed at your personal settings in the opencloud website {os.environ.get("OC_URL", "")}")
+        sys.exit(1)
 
     if args.command == "ls":
         target = args.target
@@ -396,36 +441,29 @@ def main():
 
         spaces = get_spaces(target, oc_user, oc_apptoken)
         if url_path in ("", "oc:", "oc:/"):
-          print_spaces(spaces, long_format=args.long, json_format=args.json)
+          print_spaces(spaces, prefix="oc:", long_format=args.long, json_format=args.json)
         else:
           # print(f"{url_path}")
           space, path = resolve_space_for_path(spaces, url_path)
           # print(f"space {space}, path {path}")
           rclone_list(space["root"]["webDavUrl"], oc_user, oc_apptoken, path, args)
 
-    elif args.command == "copy":
-        src_path = args.src
-        dst = args.dst
-
-        if not src_path.startswith("oc:/"):
-            eprint("Source path must start with 'oc:/'")
-            sys.exit(1)
-
-        oc_user = oc_user_env
-        if not oc_user:
+    elif args.command in ("cp", "copy"):
+        if not oc_user_env:
             eprint("Environment variable OC_USER is missing")
             sys.exit(1)
-
-        spaces = get_spaces(oc_url, oc_user, oc_apptoken)
-        space, inner_path = resolve_space_for_path(spaces, src_path)
-
-        webdav_url = space.get("root", {}).get("webDavUrl")
-        if not webdav_url:
-            eprint("Selected space has no root.webDavUrl")
+        if not oc_url:
+            eprint("Environment variable OC_URL is missing")
             sys.exit(1)
+        spaces = get_spaces(oc_url, oc_user_env, oc_apptoken)
 
-        webdav_url = webdav_url.rstrip("/")
-        rclone_copy(webdav_url, oc_user, oc_apptoken, inner_path, dst)
+        if args.src.startswith("oc:"):
+            oc_get(oc_url, oc_user_env, oc_apptoken, spaces, args.src, args.dst, args.recursive, args.force)
+        elif args.dst.startswith("oc:"):
+            oc_put(oc_url, oc_user_env, oc_apptoken, spaces, args.src, args.dst, args.recursive, args.force)
+        else:
+            eprint(f"copy: One of src or dest must start with 'oc:'")
+            sys.exit(1)
 
     else:
         eprint(f"Unknown command: {args.command}")
