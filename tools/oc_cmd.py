@@ -8,12 +8,14 @@ Usage examples:
   oc_cmd.py ls https://username@oc.jwqa.de
   oc_cmd.py ls -r          # recursive (max-depth 0 -> no limit)
   oc_cmd.py ls -l          # long format with size and alias
+  oc_cmd.py ls -i          # with uuid.
   oc_cmd.py ls -rl         # recursive + long
   oc_cmd.py copy oc:/project/support_team/doc/subfolder .
 
 (C) 2026, j.weigert@heinlein-support.de - Distribute under GPLv2 or later.
 
 2026-10-06, jw:  v1.0:    ls and cp commands done.
+2026-10-21, jw:  v1.1:    Added -i option to ls. Improved error handling and usage printing.
 """
 
 from __future__ import annotations
@@ -82,13 +84,13 @@ def get_spaces(oc_url: str, oc_user: str, oc_apptoken: str) -> list[dict[str, An
             pass
         sys.exit(1)
     except Exception as e:
-        eprint(f"Error calling Graph API: {e}")
+        eprint(f"Error calling Graph API: {url=} {e}")
         sys.exit(1)
 
     return data.get("value", [])
 
 
-def print_spaces(spaces: list[dict[str, Any]], prefix: str = "", long_format: bool = False, json_format: bool = False):
+def print_spaces(spaces: list[dict[str, Any]], prefix: str = "", long_format: bool = False, with_id: bool = False, json_format: bool = False):
     """
     Print spaces in tabular form.
 
@@ -102,18 +104,17 @@ def print_spaces(spaces: list[dict[str, Any]], prefix: str = "", long_format: bo
         print(json.dumps(spaces, sort_keys=True, indent=4))
         return
 
+    header = [
+        "driveAlias",
+        "name",
+    ]
     if long_format:
-        header = [
-            "driveAlias",
-            "name",
+        header.extend([
             "size",
             "remoteItem.driveAlias",
-        ]
-    else:
-        header = [
-            "driveAlias",
-            "name",
-        ]
+        ])
+    if with_id:
+        header.append("id")
 
     col_widths = [len(h) for h in header]
 
@@ -126,6 +127,7 @@ def print_spaces(spaces: list[dict[str, Any]], prefix: str = "", long_format: bo
         # size: quota.used or root.remoteItem.size or null
         size = None
         quota = item.get("quota")
+        uuid = item.get("id")
         if quota is not None and "used" in quota:
             size = quota["used"]
         else:
@@ -136,18 +138,17 @@ def print_spaces(spaces: list[dict[str, Any]], prefix: str = "", long_format: bo
         remote_item = item.get("root", {}).get("remoteItem") or {}
         ri_drive_alias = remote_item.get("driveAlias", "")
 
+        row = [
+            prefix+drive_alias,
+            name,
+        ]
         if long_format:
-            row = [
-                prefix+drive_alias,
-                name,
+            row.extend([
                 str(size) if size is not None else "-",
                 ri_drive_alias,
-            ]
-        else:
-            row = [
-                prefix+drive_alias,
-                name,
-            ]
+            ])
+        if with_id:
+            row.append(uuid)
 
         rows.append(row)
         for i, val in enumerate(row):
@@ -314,16 +315,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="oc_cmd",
         description=f"oc_cmd version {version} - OpenCloud CLI wrapper using rclone and the Graph API.",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Environment variables:
+  OC_URL            Url of the server, examples: https://oc.example.com  https://username@oc.example.com  https://localhost:9200
+  OC_USER           Username to aithenticate at the server. Superceedes a username in OC_URL, if any.
+  OC_APPTOKEN       As created at your personal settings page in the opencloud website
+  OC_WEBDAV_VENDOR  Default: opencloud
 
+For more detailled usage, try --help with a command, e.g.:
+  oc_cmd ls --help
+  oc_cmd cp --help
+"""
+    )
+    subparsers = parser.add_subparsers(dest="command")  # required=True
     # ls subcommand
-    ls_parser = subparsers.add_parser("ls", help="List spaces")
+    ls_parser = subparsers.add_parser("ls", help="List spaces or their contents", epilog=parser.epilog)
     ls_parser.add_argument(
         "target",
         nargs="?",
         default=None,
-        help="Optional target: 'oc:[spacename[/path...]]' or a URL like https://username@oc.example.com:9200[/...]",
+        help="Optional target: 'oc:[spacename[/path...]]' or a URL like https://username@oc.example.com:9200",
     )
     ls_parser.add_argument(
         "-r",
@@ -340,14 +351,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Long format: include size and symlink-style alias (remoteItem.driveAlias).",
     )
     ls_parser.add_argument(
+        "-i",
+        "--id",
+        "--uuid",
+        action="store_true",
+        help="With UUID: include space id. Only effective for a toplevel spaces listing.)",
+    )
+    ls_parser.add_argument(
         "-j",
         "--json",
         action="store_true",
-        help="Output in rclone lsjson format",
+        help="Output in rclone lsjson format. This includes all available elements (-l, -i ave no effect with -j).",
     )
 
     # copy subcommand
-    copy_parser = subparsers.add_parser("copy", aliases=["cp"], help="Copy from OpenCloud to local")
+    copy_parser = subparsers.add_parser("copy", aliases=["cp"], help="Copy from or to OpenCloud", epilog=parser.epilog)
     copy_parser.add_argument(
         "src",
         help="Source path, e.g. oc:/project/support_team/doc/subfolder",
@@ -401,6 +419,12 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.command is None:
+        parser.print_help()
+        eprint("\nUsage error: No command given.")
+        sys.exit(1)
+
+
     check_rclone()
 
     oc_user_env, oc_url = parse_url_username(os.environ.get("OC_URL"))
@@ -422,7 +446,7 @@ def main():
             oc_user = oc_user_env
             target = oc_url
             if not oc_url:
-                eprint("Environment variable OC_URL is missing. Alternatively, specify the full server url instead of 'oc:'")
+                eprint("Environment variable OC_URL is missing. Alternatively, specify the full server url")
                 sys.exit(1)
             if not oc_user:
                 eprint("Environment variable OC_USER is missing (and no username in OC_URL)")
@@ -431,7 +455,7 @@ def main():
             # oc_cmd.py ls https://username@oc.jwqa.de [-r] [-l]
             url_user, new_target = parse_url_username(target)
             if url_user:
-                oc_user = url_user
+                oc_user = os.environ.get("OC_USER", url_user)    # explicit OC_USER env var takes precendce over embedded user in OC_URL
                 target = new_target
             else:
                 oc_user = os.environ.get("OC_USER")
@@ -441,7 +465,7 @@ def main():
 
         spaces = get_spaces(target, oc_user, oc_apptoken)
         if url_path in ("", "oc:", "oc:/"):
-          print_spaces(spaces, prefix="oc:", long_format=args.long, json_format=args.json)
+          print_spaces(spaces, prefix="oc:", long_format=args.long, with_id=args.id, json_format=args.json)
         else:
           # print(f"{url_path}")
           space, path = resolve_space_for_path(spaces, url_path)
