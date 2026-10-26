@@ -8,6 +8,7 @@
 # blocks port UDP 111	apt purge rpcbind; systemctl disable --now rpcbind.service
 #
 # TODO: if option --help is present togehter with an init script, we should run the init script locally with --help and exit.
+#
 
 verbose=true	# true,false
 
@@ -16,8 +17,8 @@ default_hcloud_type=cx23			# no longer available: cpx11, cpx21
 default_hcloud_location=hel1			# '' default empty, to let hetzner choose, nbg1, hel1, ...
 default_autostart_certbot=true			# set to false, to suppress default instalation of apache and certbot
 
-if [ -z "$1" -o "$1" == "--help" -o "$1" == "-h" ]; then
-  cat <<EOF 1>&2
+usage_exit() {
+  cat << EOF 1>&2
 Usage:
 
 	export HCLOUD_TOKEN=...
@@ -31,9 +32,15 @@ Usage:
 	export INIT_...				# all env variables starting with INIT_ are passed into env.sh (not impl.)
 						# See also script # ENV_VARS: ... this can be used to prerequire some variables.
 
-	$0 [init/]clamav[.sh]			# start a virus scanner machine
-	$0 gitlab				# start a gitlab server
-	$0 debian [args ...]			# start a simple debian machine.
+    Options:
+	-n DNS_NAME
+	--name DNS_NAME				# specify the hostname as an FQDN or relative to HCLOUD_DNS_ZONE. That overrides env var DNS_NAME
+	--help					# show this usage
+
+
+	$0 [-n DNS_NAME] [init/]clamav[.sh]	# start a virus scanner machine
+	$0 [-n DNS_NAME] gitlab			# start a gitlab server
+	$0 [-n DNS_NAME] debian [args ...]	# start a simple debian machine.
 						# Parameters (starting with the script name) are passed via env variable "ARGS" into the machine.
 
 	hcloud server-type list			# study available server types
@@ -45,7 +52,11 @@ Usage:
 	hcloud server create-image --type snapshot SERVER_NAME --description "SERVERNAME-DATE"
 	hcloud server delete SERVER_NAME; hetzner_dns del SERVER_NAME
 EOF
-  exit 0
+  exit 1
+}
+
+if [ -z "$1" -o "$1" == "--help" -o "$1" == "-h" ]; then
+  usage_exit
 fi
 
 if [ -z "$BASH_VERSION" ]; then
@@ -102,6 +113,14 @@ set_name_and_check_zone()
 }
 
 script="$1"	# TODO: handle multiple scripts and/or parameters...
+if [ "$script" == "-n" -o "$script" == '--name' ]; then
+  DNS_NAME="$2"
+  script="$3"
+  if [ -z "$script" ]; then
+    usage_exit
+  fi
+fi
+
 test -f "$script.sh" && script="$script.sh"
 
 if [ ! -f "$script" ]; then
@@ -119,6 +138,9 @@ if [ ! -f "$script" ]; then
 fi
 
 $verbose && echo "using $(readlink -f $script)"
+
+# there is confusion between DNS_NAME and DNS_NAMES variable, users want DNS_NAME, but technically, it must be a list.
+test -z "$DNS_NAMES" -a -n "$DNS_NAME" && export DNS_NAMES="$DNS_NAME"
 
 # Extract some variables from the init script
 # Values can contain blanks. A trailing comment and trailing whitespace is removed.
@@ -298,17 +320,18 @@ ssh -t root@$IPADDR bash -x -c "'systemctl disable --now rpcbind.service 2>/dev/
 ssh -t root@$IPADDR bash -x -c "'for proto in udp tcp; do iptables -A INPUT -p \$proto --dport 111 -j DROP; done'"
 
 if [ "$AUTOSTART_CERTBOT" == true ]; then
-    # enable apache ssl, so that certbot can install a cert
-    ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif; a2ensite default-ssl; systemctl restart apache2'"
+    # infuse a global servername to make apache happy. do not enable apache ssl, so that certbot can install a cert
+    (echo "ServerName $DNS_NAME"; echo "ServerAlias $(echo $FQDNS)" ) | ssh root@$IPADDR tee /etc/apache2/conf-available/servername.conf
+    ssh -t root@$IPADDR bash -x -c "'a2enmod ssl setenvif servername; a2dissite default-ssl; systemctl restart apache2'"
 
     # just get something up and running. good for debugging apache chaos.
     # FIXME: the code here, does not really work reliably.
-    print "FIXME: EARLY EXIT without patching apache config"
-    exit 0
+    # printf "FIXME: EARLY EXIT without patching apache config"
+    # exit 0
 
     # infuse all dns names into the default-ssl.conf so that certbot does not ask questions.
-    ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerAlias $(echo $FQDNS)'" /etc/apache2/sites-available/default-ssl.conf
-    ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $DNS_NAME'" /etc/apache2/sites-available/default-ssl.conf
+    # ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerAlias $(echo $FQDNS)'" /etc/apache2/sites-available/default-ssl.conf
+    # ssh root@$IPADDR sed -i "'/<VirtualHost /a\		ServerName $DNS_NAME'" /etc/apache2/sites-available/default-ssl.conf
 
     le_backup="le-backup-$(echo "$DNS_NAME" | tr . -).tar.gz"
     if [ -z "$(find . -maxdepth 1 -type f -name "$le_backup" -mtime -2)" ]; then
