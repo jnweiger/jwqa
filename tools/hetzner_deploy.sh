@@ -10,7 +10,8 @@
 # TODO: if option --help is present togehter with an init script, we should run the init script locally with --help and exit.
 #
 
-verbose=true	# true,false
+verbose=false	# true,false
+detach=false	# true,false
 
 default_hcloud_image=ubuntu-26.04
 default_hcloud_type=cx23			# no longer available: cpx11, cpx21
@@ -35,28 +36,69 @@ Usage:
     Options:
 	-n DNS_NAME
 	--name DNS_NAME				# specify the hostname as an FQDN or relative to HCLOUD_DNS_ZONE. That overrides env var DNS_NAME
-	--help					# show this usage
+	--detach | -d				# Detach after starting. Default: keep a root shell connected (via screen) after start up.
+	--verbose | -v				# be more verbose
+	--help | -h				# show this usage
 
 
-	$0 [-n DNS_NAME] [init/]clamav[.sh]	# start a virus scanner machine
-	$0 [-n DNS_NAME] gitlab			# start a gitlab server
-	$0 [-n DNS_NAME] debian [args ...]	# start a simple debian machine.
-						# Parameters (starting with the script name) are passed via env variable "ARGS" into the machine.
+    $(basename $0) [options] [init/]clamav[.sh]		# start a virus scanner machine
+    $(basename $0) gitlab				# start a gitlab server
+    $(basename $0) -n FQDN -d debian [args ...]		# start a simple debian machine (with apache and ssl-cert)
+							# Parameters (starting with the script name) are passed via env variable "ARGS" into the machine.
 
-	hcloud server-type list			# study available server types
-	hcloud image list  -a x86 | grep '\(debian\|ubuntu\)'	# study available images
-	hcloud location list			# study available locations
+    hcloud server-type list				# study available server types
+    hcloud location list				# study available locations
+    hcloud image list  -a x86 | grep '\(debian\|ubuntu\)'	# study available images
 
-	# eventually...
-	hcloud server list
-	hcloud server create-image --type snapshot SERVER_NAME --description "SERVERNAME-DATE"
-	hcloud server delete SERVER_NAME; hetzner_dns del SERVER_NAME
+    # eventually...
+    hcloud server list
+    hcloud server create-image --type snapshot SERVER_NAME --description "SERVERNAME-DATE"
+    hcloud server delete SERVER_NAME; hetzner_dns del SERVER_NAME
 EOF
+  if [ -n "$1" ]; then
+    echo "" 1>&2
+    echo "$1" 1>&2
+  fi
   exit 1
 }
 
-if [ -z "$1" -o "$1" == "--help" -o "$1" == "-h" ]; then
-  usage_exit
+while (($#)); do
+  case "$1" in
+    -n|--name)
+      if [ -z "$2" ]; then
+	usage_exit "ERROR: $1 requires a name argument."
+      fi
+      DNS_NAME="$2"
+      shift 2
+      ;;
+    -d|--detach)
+      detach=true
+      shift
+      ;;
+    -v|--verbose)
+      verbose=true
+      shift
+      ;;
+    -h|--help)
+      usage_exit
+      ;;
+    -*)
+      usage_exit "ERROR: $1 unknown option."
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+
+script="${1:-}"
+if [ -z "$script" ]; then
+  usage_exit "ERROR: no startup script specified. Hint: Try 'debian'"
 fi
 
 if [ -z "$BASH_VERSION" ]; then
@@ -112,15 +154,6 @@ set_name_and_check_zone()
   name="${name%.$HCLOUD_DNS_ZONE}"	# strip the zone name, if included.	# hcloud server name may contain dots.
 }
 
-script="$1"	# TODO: handle multiple scripts and/or parameters...
-if [ "$script" == "-n" -o "$script" == '--name' ]; then
-  DNS_NAME="$2"
-  script="$3"
-  if [ -z "$script" ]; then
-    usage_exit
-  fi
-fi
-
 test -f "$script.sh" && script="$script.sh"
 
 if [ ! -f "$script" ]; then
@@ -171,6 +204,7 @@ test -z "$DNS_NAMES" 		&& DNS_NAMES=$(echo "$HCLOUD_IMAGE-DATE" | tr '._' '-')
 DNS_NAMES="$(echo "$DNS_NAMES" | sed -e "s@DATE@$(date +%Y%m%d)@")"
 set_name_and_check_zone "$(echo "$DNS_NAMES" | head -n1)"		# first element, if its a list.
 
+## FIXME: that fails, if DNS_NAMES are already FQDNs
 FQDNS="$(echo "$DNS_NAMES" | sed -e "s/$/.$HCLOUD_DNS_ZONE/")"
 
 ssh_key_opts=''
@@ -312,8 +346,11 @@ set mouse=
 " avoid tabs in python
 autocmd FileType python setlocal expandtab tabstop=4 shiftwidth=4 softtabstop=4
 END
+
+## Comfort Zone things:
 # Dark blue for directories (01;34) does not work well on black background.
 ssh root@$IPADDR "echo 'export LS_COLORS=\"\$LS_COLORS:di=01;36\"' >> .bashrc"
+ssh root@$IPADDR "echo 'alias ll=\"ls -la\"' >> .bashrc"
 
 # keep public port 111 closed.
 ssh -t root@$IPADDR bash -x -c "'systemctl disable --now rpcbind.service 2>/dev/null'"	# just to be safe.
@@ -379,7 +416,20 @@ if [ -d "$asset_dir" ]; then
   ssh root@$IPADDR "mkdir init"
   scp -r $asset_dir root@$IPADDR:init
 fi
-ssh -t root@$IPADDR screen -L -m "bash -c 'source INIT.bashrc; exec bash'"
+
+ssh root@$IPADDR "cat >> .bash_history" <<END
+cat INIT.bashrc
+screen -D -R
+END
+
+if $detach; then
+  ssh root@$IPADDR screen -L -d -m "bash -c 'source INIT.bashrc; exec bash'"
+  echo ""
+  echo "Hint: log in to this server with:"
+  echo "	ssh -o 'StrictHostKeyChecking=no' root@$DNS_NAME"
+else
+  ssh -t root@$IPADDR screen -L -m "bash -c 'source INIT.bashrc; exec bash'"
+fi
 
 echo ""
 echo "Hint: When you no longer need this server, you can remove it with:"
