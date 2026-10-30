@@ -8,22 +8,18 @@ set -- $ARGS
 
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
-apt install -y apt-file
+apt install -y apt-file				# is that obsoleted by apt search ... ???
 (set -x; apt-file update 2>&1 >/dev/null) 	# so that we can use: apt-file search ....
 (set -x; apt upgrade -y)
 
+if [ -n "$HCLOUD_DNS_ZONE" ]; then
+  # add a search domain to resolv.conf, so that short hostnames work. 
+  # resolvconf -u also makes 'hostname --fqdn' work. WOW. (domainname does not.)
+  domainname "$HCLOUD_DNS_ZONE"
+  echo search "$HCLOUD_DNS_ZONE" >> /etc/resolvconf/resolv.conf.d/base
+  resolvconf -u
+fi
+
 echo
 echo "ARGS: $ARGS"
-
-mkdir -p /mnt/loop
-(set -x; dd if=/dev/zero of=/mnt/loop/loop0.img bs=1G count=12)
-losetup /dev/loop0 /mnt/loop/loop0.img
-pvcreate /dev/loop0
-vgcreate loop-vg /dev/loop0
-for id in 0 1 2 3; do
-  lvcreate -l 25%VG -n data-$id loop-vg
-done
-lsblk /dev/loop0
-vgchange -ay loop-vg	# make /dev/loop-vg/data-* appear.
-(set -x; lvs -o vg_name,lv_name,lv_path)
 
