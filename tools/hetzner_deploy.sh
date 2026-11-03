@@ -223,8 +223,9 @@ if [ -n "$(hcloud server ip "$hname" 2>/dev/null)" ]; then
   exit 1
 fi
 
+# let's create without ipv6, they count against my ip address limit of 20. and I don't need them.
 set -x
-hcloud server create --type "$HCLOUD_TYPE" --location "$HCLOUD_LOCATION" --label "$origin_label" $ssh_key_opts --image "$HCLOUD_IMAGE" --name "$hname" || exit 1
+hcloud server create --without-ipv6 --type "$HCLOUD_TYPE" --location "$HCLOUD_LOCATION" --label "$origin_label" $ssh_key_opts --image "$HCLOUD_IMAGE" --name "$hname" || exit 1
 set +x
 
 ssh_opts="-o ConnectTimeout=10 -o CheckHostIP=no -o StrictHostKeyChecking=no -o PasswordAuthentication=no"
@@ -303,7 +304,7 @@ done
 # echo "Press Enter to continue"
 # read a
 
-extra_pkg="screen git vim less curl wget xtail ca-certificates"	
+extra_pkg="screen git vim less curl wget xtail ca-certificates"
 # for older ubuntu: apt-transport-https
 if [ "$AUTOSTART_CERTBOT" == true ]; then
     extra_pkg="$extra_pkg certbot python3-certbot-apache apache2"

@@ -34,14 +34,51 @@ done
 mgr_host_count=3
 mgrhosts=""
 for mgr in $(seq 0 $(($mgr_host_count - 1))); do
-  mgrhosts="$mgrhosts$nameprefix$mon
+  mgrhosts="$mgrhosts$nameprefix$mgr
 "
 done
 
+sshr ()
+{
+  # an ssh wrapper with retry, in case dns fails.
+  # that happens, when recreating a host with the same dns name, but hetzner chooeses a new ip address and our local dns is behind.
+  # Assumption: first parameter has username@hostname
+  sshlog=/tmp/ssh-err.$$.log
+  rm -f $sshlog
+
+  echo "|+ ssh $@" 1>&2
+  ssh -v -o ConnectionAttempts=3 -o ConnectTimeout=10 -E $sshlog "$@"
+  if [ -s "$sshlog" ]; then
+    cat $sshlog 1>&2
+  fi
+  if grep -q ': Connection timed out' $sshlog; then
+    servername=$(echo "$1" | sed -ne 's/.*@//p')
+    username=$(echo "$1" | sed -ne 's/@.*//p')
+    if [ -z "$servername" ]; then
+      echo "sshr retry ERROR: could not find a servername in first parameter: $1" 1>&2
+      exit 2
+    fi
+    # try with full servername (fqdn?)
+    ipaddr=$(hcloud server describe $servername -o json 2>/dev/null| jq -r .public_net.ipv4.ip)
+    if [ -z "$ipaddr" ]; then
+      # retry with short name
+      shortname=$(echo "$servername" | sed -e 's/\..*//')
+      ipaddr=$(hcloud server describe $shortname -o json 2>/dev/null| jq -r .public_net.ipv4.ip)
+    fi
+    if [ -z "$ipaddr" ]; then
+      echo "sshr retry ERROR: could could get ipaddr for $servername or $shortname from hcloud." 1>&2
+      exit 3
+    fi
+    shift
+    echo "|++ ssh $username@$ipaddr $@" 1>&2
+    ssh -o ConnectionAttempts=5 $username@$ipaddr "$@"
+  fi
+  rm -f $sshlog
+}
+
 ssh_admin()
 {
-  echo "|+ $@" 1>&2
-  ssh root@$adminhost.$domain "$@"
+  sshr root@$adminhost.$domain "$@"
 }
 
 wait_for_progress()
@@ -66,7 +103,7 @@ existing_hosts="$(echo $(hcloud server list -o noheader -o columns=name))"
 for host in $allhosts; do
   case " $existing_hosts " in
     *" $host "*)
-      echo "ERROR: '$host' already exists. Please check hcloud server list / export CEPH_NAME_PREFIX=..."
+      echo "ERROR: '$host' already exists. Please check hcloud server list / export CEPH_NAME_PREFIX=..." 1>&2
       exit 1
       ;;
   esac
@@ -78,7 +115,12 @@ for host in $allhosts; do
   # forget any old host keys, if any. We know, the host is a new one, ...
   ssh-keygen -R $host.$domain -f ~/.ssh/known_hosts
   # and store the now one...
-  ssh -o 'StrictHostKeyChecking=accept-new' root@$host.$domain hostname
+  realhost=$(ssh -o ConnectTimeout=10 -o 'StrictHostKeyChecking=accept-new' root@$host.$domain hostname || true)
+  if [ -n "$realhost" -a "$realhost" != "$host" -a "$realhost" != "$host.$domain" ]; then
+    echo "ERROR: hostname mismatch. Do we have DNS confusion? $realhost != $host"
+    echo "Presse ENTER to continue, CTRL-C to abort."
+    read a
+  fi
   # FIXME: both of the above should be done by hetzner_deploy
 done
 
@@ -99,22 +141,29 @@ KEYDIR="/tmp/ceph-tmp-$$"
 mkdir -p "$KEYDIR"
 ssh-keygen -t ed25519 -f "$KEYDIR/id_ed25519" -N "" -C "ceph-temp-$$"
 for host in $allhosts; do
-  scp -r $KEYDIR/* root@$host.$domain:.ssh/
+  for file in $KEYDIR/*; do
+    cat $file | sshr root@$host.$domain tee .ssh/$(basename $file)
+    # do not use scp, we don't have a wrapper for broken dns.
+  done
+  sshr root@$host.$domain chmod 600 .ssh/id_ed25519 || true	# guessing the name...
   ## create user cephchef with sudo and one ssh-key all across the cluster.
-  ssh root@$host.$domain deluser --remove-home $cephchef || true
-  ssh root@$host.$domain "adduser --disabled-password --gecos 'Ceph Chef,,,' $cephchef"
+  sshr root@$host.$domain deluser --remove-home $cephchef || true
+  sshr root@$host.$domain "adduser --disabled-password --gecos 'Ceph Chef,,,' $cephchef"
   # inherit .ssh from root user, but also add our own id_ed25519.pub to our authorized_keys
-  ssh root@$host.$domain "cp -a /root/.ssh ~$cephchef/; chown -R $cephchef:$cephchef ~$cephchef/.ssh; cat ~$cephchef/.ssh/*.pub >> ~$cephchef/.ssh/authorized_keys"
+  sshr root@$host.$domain "cp -a /root/.ssh ~$cephchef/; chown -R $cephchef:$cephchef ~$cephchef/.ssh; cat ~$cephchef/.ssh/*.pub >> ~$cephchef/.ssh/authorized_keys"
   # allow passwordless sudo
-  ssh root@$host.$domain "echo 'cephchef ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/cephchef"
+  sshr root@$host.$domain "echo 'cephchef ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/cephchef"
 done
 rm -rf $KEYDIR
 
+ssh_admin "for i in 1 2 3 4; do ssh -o 'StrictHostKeyChecking=accept-new' $nameprefix\$i hostname; done"	# accept the host keys...
+
+
 if [ ! -d $ansible_dir_name ]; then
-  git clone --recursive git@gitlab.heinlein-support.de:ansible-playbooks/general-ceph-deployment.git ansible_dir_name
+  git clone --recursive git@gitlab.heinlein-support.de:ansible-playbooks/general-ceph-deployment.git $ansible_dir_name
 fi
 
-cd ansible_dir_name
+cd $ansible_dir_name
 echo "ansible working directory:"
 pwd -P
 
@@ -135,16 +184,20 @@ hcloud network create -o json --name $net_name --ip-range $net_cidr
 subnet_cidr=$(echo $net_cidr | sed -e 's@/20@/24@')
 subnet_prefix=$(echo $subnet_cidr | sed -e 's@\.0/24$@.@')
 
-hcloud network add-subnet $net_name --type server --network-zone hcloud_network_zone --ip-range $subnet_cidr
+hcloud network add-subnet $net_name --type server --network-zone $hcloud_network_zone --ip-range $subnet_cidr
 
 etc_hosts_block=""
 for host in $allhosts; do
   echo > host_vars/$host.yaml "ansible_host: $host.$domain"
 
   #  attach to the network, this takes a while
-  hcloud server attach-to-network --network $cluster_net_name $host
-  # find the interface name
-  net_match=$(ssh root@$host.$domain ip -4 -o addr show | grep -s $subnet_prefix)
+  hcloud server attach-to-network --network $net_name $host
+  # find the interface name, this appears to be racy, as we just maniplated networks. better wait a bit.
+  # sshr just exits with exit code 1, without printing anything when it fails here. No retry, nothing seems to trigger.
+  sleep 2; echo .
+  sleep 2; echo .
+  sleep 2; echo .
+  net_match=$(sshr root@$host.$domain ip -4 -o addr show | grep -s $subnet_prefix)
   interface=$(echo $net_match | sed -e 's@\S\S*\s\(\S\S*\).*@\1@')
   ipaddr=$(echo $net_match | sed -e 's@.*\sinet\s\([0-9\.]*\).*@\1@')
   echo >> host_vars/$host.yaml "ceph_public_interface=$interface"
@@ -248,7 +301,7 @@ osd$gen_label
 ceph_label_osd="osd$gen_label"
 
 [osd$gen_label]
-$osdhosts
+$(echo $osdhosts | tr ' ' \\n)
 EOF
 
 ansible all -v -i inventory.ini -m ping
@@ -304,8 +357,6 @@ ssh_admin "sed -i ceph-initial.conf -e 's@\[global\]@[global]\npublic_network=$s
 #
 # Bootstrap the Ceph cluster with ./ceph-bootstrap.sh.
 
-## this is found at root user, not cephchef. FIXME: check, is cephchef not used?
-#
 ssh_admin ./ceph-bootstap.sh --skip-mon-network
 
 wait_for_progress
