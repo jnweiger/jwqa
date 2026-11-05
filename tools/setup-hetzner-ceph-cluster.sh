@@ -47,7 +47,7 @@ sshr ()
   rm -f $sshlog
 
   echo "|+ ssh $@" 1>&2
-  ssh -v -o ConnectionAttempts=3 -o ConnectTimeout=10 -E $sshlog "$@"
+  ssh -o ConnectionAttempts=3 -o ConnectTimeout=10 -E $sshlog "$@"
   if [ -s "$sshlog" ]; then
     cat $sshlog 1>&2
   fi
@@ -156,7 +156,7 @@ for host in $allhosts; do
 done
 rm -rf $KEYDIR
 
-ssh_admin "for i in 1 2 3 4; do ssh -o 'StrictHostKeyChecking=accept-new' $nameprefix\$i hostname; done"	# accept the host keys...
+sshr $cephchef@$adminhost.$domain "for i in 1 2 3 4; do ssh -o 'StrictHostKeyChecking=accept-new' $nameprefix\$i hostname; done"	# accept the host keys...
 
 
 if [ ! -d $ansible_dir_name ]; then
@@ -200,7 +200,7 @@ for host in $allhosts; do
   net_match=$(sshr root@$host.$domain ip -4 -o addr show | grep -s $subnet_prefix)
   interface=$(echo $net_match | sed -e 's@\S\S*\s\(\S\S*\).*@\1@')
   ipaddr=$(echo $net_match | sed -e 's@.*\sinet\s\([0-9\.]*\).*@\1@')
-  echo >> host_vars/$host.yaml "ceph_public_interface=$interface"
+  echo >> host_vars/$host.yaml "ceph_public_interface: $interface"
   etc_hosts_block="$etc_hosts_block$ipaddr $host
 "
 done
@@ -263,7 +263,9 @@ configure_haproxy=false
 
 registry_directory=/var/spool/registry-cache
 
-configure_apt_sources=true
+# if true, prepare_hosts.yaml tries to access http://$adminhost.$domain/ubuntu/dists/noble/...
+# FIXME: cannot be switched back to false, if it was true once. Manualy undo what deploy-apt-source.yaml did.
+configure_apt_sources=false
 
 configure_vlans=false
 configure_firewall=false
@@ -305,7 +307,7 @@ $(echo $osdhosts | tr ' ' \\n)
 EOF
 
 ansible all -v -i inventory.ini -m ping
-
+set -x
 
 ## Seems it is okay to skip this registry-caches.yaml (I have configure_registry_proxies=false)
 
@@ -328,7 +330,7 @@ ansible-playbook -D new-host.yaml
 # [global]
 # public_network=10.66.0.0/16
 
-ssh_admin "sed -i ceph-initial.conf -e 's@\[global\]@[global]\npublic_network=$subnet_cidr@'"
+ssh_admin "sed -i ceph-initial.conf -e 's@\[global\]@[global]\npublic_network = $subnet_cidr@'"
 
 
 ## we need --skip-mon-network to avoid an error due to the strange /32 interfaces.:
@@ -357,7 +359,7 @@ ssh_admin "sed -i ceph-initial.conf -e 's@\[global\]@[global]\npublic_network=$s
 #
 # Bootstrap the Ceph cluster with ./ceph-bootstrap.sh.
 
-ssh_admin ./ceph-bootstap.sh --skip-mon-network
+ssh_admin ./ceph-bootstrap.sh --skip-mon-network
 
 wait_for_progress
 
@@ -412,7 +414,7 @@ hcloud firewall apply-to-resource --type server --server "$adminhost" "$fwid"
 
 # ask for $osds_per_host, with the one volume device, we have.
 cat <<EOF | ssh_admin tee osd$gen_label.yml
- service_type: osd
+service_type: osd
 service_id: ssd$gen_label
 placement:
   label: osd$gen_label
@@ -426,6 +428,17 @@ EOF
 ssh_admin ceph orch apply -i osd$gen_label.yml
 
 wait_for_progress
+ssh_admin 'ceph osd crush rule create-replicated repl_host_ssd default host ssd'
+ssh_admin 'ceph osd pool set .mgr crush_rule repl_room_ssd'
+ssh_admin 'ceph osd crush rule rm replicated_rule'
+
+# and finally some FS volumes:
+ssh_admin 'ceph osd pool set noautoscale'
+ssh_admin 'for fs in CL01 CL02; do ceph fs volume create $fs label:$fs; done'
 
 ssh_admin ceph orch host ls
-ssh_admin ceph osd tree
+ssh_admin ceph osd df tree
+ssh_admin ceph osd pool ls detail
+ssh_admin ceph fs status
+
+

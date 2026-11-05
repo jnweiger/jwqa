@@ -116,6 +116,10 @@ if [ "$1" == "del" ]; then
   # $verbose && echo "$a_records"
 
   matches=$(echo "$a_records" | grep "\"$name\"" | tr -d '"[]')
+  if [ -z "$matches" ]; then
+    echo 1>&2 "hetzner_dns del: $name not found."
+    exit 1
+  fi
   # av      46.62.160.228
   # foo     46.62.160.228
   while read name ipaddr; do
