@@ -9,9 +9,11 @@ export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
 for kv in $ARGS; do
-   name=${kv%%=*}
-   test -n "$name" && export $kv
-   echo "export $kv" >> env.sh
+   # all args with an = in the middle contribute to our env.
+   if [ "${kv%%=*}" != "$kv" ]; then
+	echo "export $kv" >> env.sh
+	export $kv
+   fi
 done
 
 apt purge -y apache2
@@ -19,20 +21,21 @@ apt install -y nginx openssl ca-certificates certbot python3-certbot-nginx
 
 if [ -n "$HCLOUD_DNS_ZONE" ]; then
   # FIXME:  this should go into hetzner_deploy.sh
-  # add a search domain to resolv.conf, so that short hostnames work. 
+  # add a search domain to resolv.conf, so that short hostnames work.
   # resolvconf -u also makes 'hostname --fqdn' work. WOW. (domainname does not.)
   domainname "$HCLOUD_DNS_ZONE"
-  ## /etc/resolvconf/* does not exist today..??? 
+  ## /etc/resolvconf/* does not exist today..???
   # echo search "$HCLOUD_DNS_ZONE" >> /etc/resolvconf/resolv.conf.d/base
-  # resolvectl .... ??? 
+  # resolvectl .... ???
 fi
 
+# FQDNS may be newline separated. use echo to get them all in one line.
 cat <<EOF > /etc/nginx/sites-available/ssl-proxy
 server {
     listen 443 ssl;
     http2 on;
 
-    server_name $DNS_NAME;
+    server_name $(echo $FQDNS);
 
     ssl_certificate     /etc/letsencrypt/live/$DNS_NAME/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DNS_NAME/privkey.pem;
@@ -51,7 +54,7 @@ server {
 
 server {
     listen 80;
-    server_name $DNS_NAME;
+    server_name $(echo $FQDNS);
 
     return 301 https://\$host\$request_uri;
 }
