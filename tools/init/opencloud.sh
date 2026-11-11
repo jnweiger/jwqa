@@ -106,6 +106,11 @@ server {
 }
 EOF
 
+## Reference:
+# - https://sdk.collaboraonline.com/docs/installation/Proxy_settings.html#reverse-proxy-settings-in-nginx-config-ssl-termination
+# Reverse proxy settings in Nginx config (SSL termination)
+# In coolwsd.xml the corresponding setting is ssl.enable=false and ssl.termination=true.
+#
 cat <<EOF > /etc/nginx/sites-available/collabora
 server {
     listen 80;
@@ -116,28 +121,61 @@ server {
 }
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
+ listen       443 ssl;
+ listen [::]:443 ssl;
 
-    server_name collabora.$DNS_NAME;
+ server_name collabora.$DNS_NAME;
 
-    ssl_certificate /etc/letsencrypt/live/$DNS_NAME/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DNS_NAME/privkey.pem;
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers off;
+ ssl_certificate /etc/letsencrypt/live/$DNS_NAME/fullchain.pem;
+ ssl_certificate_key /etc/letsencrypt/live/$DNS_NAME/privkey.pem;
 
 
-    location / {
-        proxy_pass http://127.0.0.1:9980;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
+ # static files
+ location ^~ /browser {
+   proxy_pass http://127.0.0.1:9980;
+   proxy_set_header Host \$host;
+ }
+
+
+ # WOPI discovery URL
+ location ^~ /hosting/discovery {
+   proxy_pass http://127.0.0.1:9980;
+   proxy_set_header Host \$host;
+ }
+
+
+ # Capabilities
+ location ^~ /hosting/capabilities {
+   proxy_pass http://127.0.0.1:9980;
+   proxy_set_header Host \$host;
+ }
+
+
+ # main websocket, download, presentation (legacy svg) and image upload
+ location ^~ /cool/ {
+   proxy_pass http://127.0.0.1:9980;
+   proxy_http_version 1.1;
+   proxy_set_header Upgrade \$http_upgrade;
+   proxy_set_header Connection "Upgrade";
+   proxy_set_header Host \$host;
+   proxy_read_timeout 36000s;
+ }
+
+
+ # health checks, used since 26.04.3.1 by load balancers and monitoring
+ location ^~ /livez {
+   proxy_pass http://127.0.0.1:9980;
+   proxy_set_header Host \$host;
+ }
+
+
+ location ^~ /readyz {
+   proxy_pass http://127.0.0.1:9980;
+   proxy_set_header Host \$host;
+ }
 }
 EOF
+
 ln -s /etc/nginx/sites-available/collabora     /etc/nginx/sites-enabled/collabora
 ln -s /etc/nginx/sites-available/mail-inbucket /etc/nginx/sites-enabled/mail-inbucket
 nginx -t
@@ -200,6 +238,11 @@ echo >> .env "SMTP_AUTHENTICATION=none"
 
 echo >> .env 'OC_ENABLE_GUEST_LINKS=true'
 echo >> .env "START_ADDITIONAL_SERVICES=notifications"
+
+# collabora behind nginx ssl termination
+echo >> .env "COLLABORA_SSL_ENABLE=false"
+echo >> .env "COLLABORA_SSL_VERIFICATION=false"
+echo >> .env "COLLABORA_SSL_TERMINATION=true"	# that is hardcoded true in weboffice/collabora.yaml
 
 # optional: customize via custom/guest.yml
 # 	For a complete list of settings, see the [auth-guest environment variables](../../dev/server/services/auth-guest/env-vars.mdx)
