@@ -10,7 +10,6 @@
 # TODO: if option --help is present togehter with an init script, we should run the init script locally with --help and exit.
 #
 
-set -x
 verbose=false	# true,false
 detach=false	# true,false
 
