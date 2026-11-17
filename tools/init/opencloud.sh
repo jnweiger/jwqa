@@ -63,11 +63,13 @@ admin_pass="$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8)"
 test -n "$INIT_ADMIN_PASS" && export admin_pass="$INIT_ADMIN_PASS"
 echo >> env.sh "export admin_pass=$admin_pass"
 
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh ./get-docker.sh
+if ! systemctl is-enabled docker; then
+  curl -fsSL https://get.docker.com -o get-docker.sh
+  sh ./get-docker.sh
 
-systemctl enable docker
-systemctl start docker
+  systemctl enable docker
+  systemctl start docker
+fi
 
 ## prepare inbucket
 echo >> init/opencloud/inbucket/.env "INBUCKET_DOMAIN=mail.$DNS_NAME"
@@ -98,10 +100,14 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:9000;
+        proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;   # let websockets live for a while
     }
 }
 EOF
@@ -213,7 +219,7 @@ echo >> .env "COLLABORA_DOMAIN=collabora.$DNS_NAME"
 echo >> .env "INBUCKET_DOMAIN=mail.$DNS_NAME"
 echo >> .env "DEMO_USERS=true"
 echo >> .env "INITIAL_ADMIN_PASSWORD=$admin_pass"
-echo >> .env "COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:external-proxy/opencloud.yml:external-proxy/collabora.yml"
+echo >> .env "COMPOSE_FILE=docker-compose.yml:weboffice/collabora.yml:external-proxy/opencloud.yml:external-proxy/collabora.yml:search/tika.yml"
 
 # where config, data, apps reside (default: inside docker volumes, that is not nice.
 echo >> .env "OC_CONFIG_DIR=/root/oc-run/config/"

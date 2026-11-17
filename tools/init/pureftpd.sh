@@ -2,7 +2,7 @@
 #
 # This is a simple upload only ftp server.
 #
-# ENV_VARS_OPT: FTP_PORT	# default: s14321
+# ENV_VARS_OPT: FTP_PORT	# default: 14321
 # ENV_VARS_OPT: FTP_USER	# default: ftpupload
 # ENV_VARS_OPT: FTP_PASS	# default: ... see below
 # ENV_VARS_OPT: FTP_UMASK	# default: 533:422 (aka upload-only) use "002:002" for free file sharing.
@@ -25,6 +25,8 @@
 # -> this t=511 should be t=2 normally. password hashing takes ca 10 to 20 seconds of CPU time with t=511
 #    -> every login is delayed by that hashing time.
 #	-> https://github.com/mbentley/docker-pure-ftpd/issues/1
+#
+# Note: pureftp supports a --uploadscript option. ...
 
 
 export FTP_PORT=14321		# default, can be overridden by passing FTP_PORT=2121 as a parameter to pureftpd
@@ -45,12 +47,13 @@ chmod u-r  /srv/ftp/data	# disallow no directory listings.
 chmod g+rs /srv/ftp/data	# sticky bit, so that users in www-data group can read the files, even if we uid=1000 cannot.
 ln -s /srv/ftp/data pure-ftpd	# convenience for the root user
 
+if ! systemctl is-enabled docker; then
+  curl -fsSL https://get.docker.com -o get-docker.sh
+  sh ./get-docker.sh
 
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh ./get-docker.sh
-
-systemctl enable docker
-systemctl start docker
+  systemctl enable docker
+  systemctl start docker
+fi
 
 cd pure-ftpd
 
@@ -61,7 +64,9 @@ cat <<EOF>docker-compose.yaml
 services:
   ftpd:
     image: stilliard/pure-ftpd:hardened
-    # image: mbentley/pure-ftpd:latest		# has a 10 sec delay when logging in. https://github.com/mbentley/docker-pure-ftpd/issues/1
+    # image: mbentley/pure-ftpd:latest		# 10 sec delay -> https://github.com/mbentley/docker-pure-ftpd/issues/1
+    # image: mbentley/pure-ftpd:latest		# has both amd64 and arm64 support
+    # image: crazymax/pure-ftpd:latest		# also lists arm64, arm/v6 arm/v7 ...
     container_name: pureftpd
     restart: unless-stopped
     ports:
