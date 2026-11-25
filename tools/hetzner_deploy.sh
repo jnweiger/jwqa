@@ -201,17 +201,18 @@ test -z "$HCLOUD_IMAGE"   	&& HCLOUD_IMAGE=$default_hcloud_image
 test -z "$HCLOUD_LOCATION" 	&& HCLOUD_LOCATION=$default_hcloud_location
 test -z "$AUTOSTART_CERTBOT"	&& AUTOSTART_CERTBOT=$default_autostart_certbot
 test -z "$DNS_NAMES" 		&& DNS_NAMES=$(echo "$HCLOUD_IMAGE-DATE" | tr '._' '-')
-DNS_NAMES="$(echo "$DNS_NAMES" | sed -e "s@DATE@$(date +%Y%m%d)@")"
+DNS_NAMES="$(echo "$DNS_NAMES" | sed -e "s@DATE@$(date +%Y%m%d)@g")"
 set_name_and_check_zone "$(echo "$DNS_NAMES" | head -n1)"		# first element, if its a list.
 
 ## FIXME: that fails, if DNS_NAMES are already FQDNs
-FQDNS="$(echo "$DNS_NAMES" | sed -e "s/$/.$HCLOUD_DNS_ZONE/")"
+# DNS_NAMES may be newline separated. in FQDNS, We normalize that to whitespace separated
+##
+FQDNS="$(echo $DNS_NAMES | sed -e "s/\\S\\S*/&.$HCLOUD_DNS_ZONE/g")"
 
 ssh_key_opts=''
 for key in $(echo "$HCLOUD_SSHKEY_NAMES" | tr ',' ' '); do
   ssh_key_opts="$ssh_key_opts --ssh-key $key"
 done
-
 
 origin_label="$(echo "orgin=$(basename $0) $1" | tr ' /:.,;+-' '_')"	# only alpanumeric and _, sigh
 hname="$(echo "$name" | tr ' /:,;+_' '-')"				# not strictly needed, but hostname looks better, this way.
@@ -270,7 +271,7 @@ done
 $verbose && echo "$IPADDR is ready."
 
 full_command="$0 $*"
-export DNS_NAME="$(echo "$FQDNS" | head -n1)"	# first of all names, if multiple
+export DNS_NAME="$(echo "$FQDNS" | sed -e 's/\s.*$//' | head -n1)"	# first of all names, if multiple (space or newline separated)
 
 # generate env.sh
 env_sh="$(cat <<EOF
@@ -404,7 +405,7 @@ if [ "$AUTOSTART_CERTBOT" == true ]; then
        # we have a saved certificate for this name that we want to use.
        echo "Restoring cert from $le_backup ..."
        ssh root@$IPADDR tar zxf - -C / < $le_backup
-       ssh root@$IPADDR "certbot certificates; certbot --apache install --cert-name $DNS_NAME; systemctl reload apache2"
+       ssh root@$IPADDR "certbot certificates; certbot --non-interactive --apache install --cert-name $DNS_NAME; systemctl reload apache2"
     fi
 fi
 

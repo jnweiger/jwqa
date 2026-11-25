@@ -13,6 +13,7 @@ apt install -y apt-file				# is that obsoleted by apt search ... ???
 (set -x; apt upgrade -y)
 
 if [ -n "$HCLOUD_DNS_ZONE" ]; then
+  # FIXME:  this should go into hetzner_deploy.sh
   # add a search domain to resolv.conf, so that short hostnames work. 
   # resolvconf -u also makes 'hostname --fqdn' work. WOW. (domainname does not.)
   domainname "$HCLOUD_DNS_ZONE"
