@@ -214,7 +214,7 @@ done
 
 
 origin_label="$(echo "orgin=$(basename $0) $1" | tr ' /:.,;+-' '_')"	# only alpanumeric and _, sigh
-hname="$(echo "$name" | tr ' /:.,;+_' '-')"				# not strictly needed, but hostname looks better, this way.
+hname="$(echo "$name" | tr ' /:,;+_' '-')"				# not strictly needed, but hostname looks better, this way.
 
 if [ -n "$(hcloud server ip "$hname" 2>/dev/null)" ]; then
   echo 1>&2 "ERROR: a server named '$hname' already exists."
