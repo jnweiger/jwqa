@@ -15,7 +15,7 @@ echo -n "Searching "
 curl -s -H "Authorization: Bearer $HCLOUD_TOKEN"   https://api.hetzner.cloud/v1/_tokens/current | jq -r '"hcloud project " + .token.project.name'
 echo "for server names starting with $prefix ..."
 
-hosts=$(hcloud server list -o noheader -o columns=name | grep "^$prefix")
+hosts=$(hcloud server list -o noheader -o columns=name | grep "^$prefix" | sort)
 echo $hosts
 echo
 

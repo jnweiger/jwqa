@@ -376,15 +376,6 @@ if [ "$AUTOSTART_CERTBOT" == true ]; then
     if [ -z "$(find . -maxdepth 1 -type f -name "$le_backup" -mtime -2)" ]; then
        # we need a fresh certificate
 
-       ## THIS DOES NOT WORK: certbot choooses a new name ...0001.conf, if that conf already exists.
-       ## prepare renewal config, so that certbot won't ask questions.
-       ## The name of the config derives from the first domain. That is what certbot does, we do that too.
-       # cat <<EOF | ssh root@$IPADDR "cat > '/etc/letsencrypt/renewal/$DNS_NAME.conf'"
-       # [renewalparams]
-       # installer = apache
-       # apache_vhost_config = /etc/apache2/sites-available/default-ssl.conf
-       # EOF
-
        # install a letsencrypt certificate (with retry, DNS may not yet be ready...)
        # TODO: this install only works partially, when we have multiple domains in d_opts.
        d_opts="$(echo \ $FQDNS | sed -e 's/\s\b/ -d /g')"
@@ -400,7 +391,7 @@ if [ "$AUTOSTART_CERTBOT" == true ]; then
        }
 
        # save the certificate for re-use...
-       ssh root@$IPADDR tar zcf - /etc/letsencrypt > $le_backup
+       ssh root@$IPADDR tar zcf - /etc/letsencrypt > $le_backup 2>/dev/null
     else
        # we have a saved certificate for this name that we want to use.
        echo "Restoring cert from $le_backup ..."

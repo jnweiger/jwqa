@@ -136,8 +136,31 @@ for host in $allhosts; do
 done
 
 
+# Run multiple hetzner_deploy in parallel.
+# We use screen to wait for the slowest one.
+# The last one started, is shown initially. When it finishes before the others,
+# screen will switch to the next one... When the last one finishes, screen will exit.
+# A 'caption always' is used to permanently show which ones are still running.
+projdir=/tmp/hcloud-boot-$prefix.$$/
+mkdir  $projdir
+tscreenrc=$projdir/screenrc
+cat <<EOT>$tscreenrc
+deflog on
+logfile $projdir/%t.log   	# one file per window, named by title
+# hardstatus alwayslastline
+caption always "%w"		# show list of all still running windows at the bottom.
+EOT
+
+winnum=0
 for host in $allhosts; do
-  hetzner_deploy -n $host -v -d debian
+  echo >>$tscreenrc "screen -t boot_$host $winnum  hetzner_deploy -n $host -v -d debian"
+  winnum="$(($winnum + 1))"
+done
+date; screen -c $tscreenrc ; date
+(cd $projdir && tail *.log)	# be nice to the user: show the last few lines of each boot log.
+rm -rf $projdir/
+
+for host in $allhosts; do
   # forget any old host keys, if any. We know, the host is a new one, ...
   ssh-keygen -R $host.$domain -f ~/.ssh/known_hosts
   # and store the now one...
@@ -479,13 +502,13 @@ ssh_admin 'ceph osd crush rule rm replicated_rule'
 
 # and finally some FS volumes:
 ssh_admin 'ceph osd pool set noautoscale'
-ssh_admin 'ceph fs volume create CEPHFS label:CEPHFS_mds'
 
-# not done by ansible
 for mds in $mdshosts; do
     ssh_admin "ceph orch host label add $mds CEPHFS_mds"
 done
-ssh_admin 'ceph orch apply mds CEPHFS label:CEPHFS_mds'
+
+ssh_admin 'ceph fs volume create CEPHFS label:CEPHFS_mds'
+
 wait_for_progress	# setting up the mds takes a while.
 
 ssh_admin ceph orch host ls
