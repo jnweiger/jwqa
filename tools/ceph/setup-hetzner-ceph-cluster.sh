@@ -1,9 +1,26 @@
 # !/bin/bash
 #
-# use hetzner-deploy to prepare hosts for a simple cluster.
+# use hetzner_deploy to prepare hosts for a simple cluster.
 # then use Roberts ansible to roll out a cluster.
 
 set -e	# exit, when there is an error.
+
+if [ -n "$1" ]; then
+  if [ "$1" == "-h" -o "$1" == "--help" ]; then
+    cat <<EOF 1>&2
+Usage:
+	$0 [CEPH_NAME_PREFIX]
+
+For more details, try:
+
+	head -n 42 $0
+
+EOF
+    exit 1
+  fi
+  CEPH_NAME_PREFIX="$1"
+fi
+
 
 osd_host_vol_size_gb=20
 osds_per_host=4
@@ -15,7 +32,8 @@ adminhost=${nameprefix}0
 allhosts="$adminhost $osdhosts"
 checkmkhost=$adminhost		# currently not used.
 cephchef=cephchef		# the user we bootstrap with.
-gen_label=2026
+ceph_version=${CEPH_VERSION:-20.2.3}
+osd_gen_label=2026
 
 hcloud_network_zone="eu-central"				# eu-central includes hel, nbg, fsn, ...
 ansible_dir_name=ceph-deployment-hcloud-$nameprefix		# a local directory, where checkout and patch ansible files
@@ -37,6 +55,14 @@ for mgr in $(seq 0 $(($mgr_host_count - 1))); do
   mgrhosts="$mgrhosts$nameprefix$mgr
 "
 done
+
+mds_host_count=2
+mdshosts=""
+for mds in $(seq 0 $(($mds_host_count - 1))); do
+  mdshosts="$mdshosts$nameprefix$(($osd_host_count - $mds))
+"
+done
+
 
 sshr ()
 {
@@ -230,7 +256,7 @@ cat <<EOF >inventory.ini
 [all:vars]
 ansible_user=$cephchef
 
-ceph_version=20.2.3
+ceph_version=$ceph_version
 cephadm_ssh_user=cephadm
 
 configure_etc_hosts=true
@@ -296,13 +322,16 @@ $monhosts
 [mgrnodes]
 $mgrhosts
 
+[mdsnodes]
+$mdshosts
+
 [osdnodes:children]
-osd$gen_label
+osd$osd_gen_label
 
-[osd$gen_label:vars]
-ceph_label_osd="osd$gen_label"
+[osd$osd_gen_label:vars]
+ceph_label_osd="osd$osd_gen_label"
 
-[osd$gen_label]
+[osd$osd_gen_label]
 $(echo $osdhosts | tr ' ' \\n)
 EOF
 
@@ -413,11 +442,11 @@ fi
 hcloud firewall apply-to-resource --type server --server "$adminhost" "$fwid"
 
 # ask for $osds_per_host, with the one volume device, we have.
-cat <<EOF | ssh_admin tee osd$gen_label.yml
+cat <<EOF | ssh_admin tee osd$osd_gen_label.yml
 service_type: osd
-service_id: ssd$gen_label
+service_id: ssd$osd_gen_label
 placement:
-  label: osd$gen_label
+  label: osd$osd_gen_label
 spec:
   data_devices:
     rotational: false
@@ -425,16 +454,28 @@ spec:
   osds_per_device: $osds_per_host
 EOF
 
-ssh_admin ceph orch apply -i osd$gen_label.yml
+ssh_admin ceph orch apply -i osd$osd_gen_label.yml
+sleep 10 	# avoid health: HEALTH_WARN;  OSD count 0 < osd_pool_default_size 3
 
 wait_for_progress
 ssh_admin 'ceph osd crush rule create-replicated repl_host_ssd default host ssd'
-ssh_admin 'ceph osd pool set .mgr crush_rule repl_room_ssd'
+
+for i in 1 2 3 4 5 6 7 8; do
+  test "$(ssh_admin 'ceph osd pool ls' | grep .mgr)" == ".mgr" && break
+  sleep 3
+done
+
+ssh_admin 'ceph osd pool set .mgr crush_rule repl_host_ssd'
 ssh_admin 'ceph osd crush rule rm replicated_rule'
 
 # and finally some FS volumes:
 ssh_admin 'ceph osd pool set noautoscale'
 ssh_admin 'for fs in CL01 CL02; do ceph fs volume create $fs label:$fs; done'
+
+# not done by ansible
+ssh_admin "for mds in $mdshosts; do ceph orch host label add $mds; done"
+ssh_admin 'for fs in CL01 CL02; do ceph orch apply mds $fs label:mds; done'
+wait_for_progress	# setting up the mds takes a while.
 
 ssh_admin ceph orch host ls
 ssh_admin ceph osd df tree
