@@ -56,7 +56,7 @@ for mgr in $(seq 0 $(($mgr_host_count - 1))); do
 "
 done
 
-mds_host_count=2
+mds_host_count=3
 mdshosts=""
 for mds in $(seq 0 $(($mds_host_count - 1))); do
   mdshosts="$mdshosts$nameprefix$(($osd_host_count - $mds))
@@ -455,14 +455,23 @@ spec:
 EOF
 
 ssh_admin ceph orch apply -i osd$osd_gen_label.yml
-sleep 10 	# avoid health: HEALTH_WARN;  OSD count 0 < osd_pool_default_size 3
 
 wait_for_progress
-ssh_admin 'ceph osd crush rule create-replicated repl_host_ssd default host ssd'
 
-for i in 1 2 3 4 5 6 7 8; do
+for i in 0 1 2 3 4 5 6 7 8 9; do
+  # ceph -s | grep 'OSD count 0 < osd_pool_default_size'
+  ssh_admin 'ceph -s' | grep  -q 'OSD count 0 ' || break	# loop a while, until OSDs come up.
+  sleep 15
+done
+
+wait_for_progress
+
+ssh_admin 'ceph osd crush rule create-replicated repl_host_ssd default host ssd'
+# repeat above until: rule repl_host_ssd already exists
+
+for i in 0 1 2 3 4 5 6 7 8 9; do
   test "$(ssh_admin 'ceph osd pool ls' | grep .mgr)" == ".mgr" && break
-  sleep 3
+  sleep 5
 done
 
 ssh_admin 'ceph osd pool set .mgr crush_rule repl_host_ssd'
@@ -470,11 +479,13 @@ ssh_admin 'ceph osd crush rule rm replicated_rule'
 
 # and finally some FS volumes:
 ssh_admin 'ceph osd pool set noautoscale'
-ssh_admin 'for fs in CL01 CL02; do ceph fs volume create $fs label:$fs; done'
+ssh_admin 'ceph fs volume create CEPHFS label:CEPHFS_mds'
 
 # not done by ansible
-ssh_admin "for mds in $mdshosts; do ceph orch host label add $mds; done"
-ssh_admin 'for fs in CL01 CL02; do ceph orch apply mds $fs label:mds; done'
+for mds in $mdshosts; do
+    ssh_admin "ceph orch host label add $mds CEPHFS_mds"
+done
+ssh_admin 'ceph orch apply mds CEPHFS label:CEPHFS_mds'
 wait_for_progress	# setting up the mds takes a while.
 
 ssh_admin ceph orch host ls
