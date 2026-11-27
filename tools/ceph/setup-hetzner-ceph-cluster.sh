@@ -25,10 +25,14 @@ fi
 osd_host_vol_size_gb=20
 osds_per_host=4
 osd_host_count=4
+mgr_host_count=3
+mon_host_count=5
+mds_host_count=2
 domain=$HCLOUD_DNS_ZONE
 nameprefix=${CEPH_NAME_PREFIX:-ceph}
 osdhosts="$(echo $(seq 1 $osd_host_count | sed -e "s/^/$nameprefix/"))"
-adminhost=${nameprefix}0
+osdhosts="$(printf "$nameprefix%02d " $(seq 1 $osd_host_count))"
+adminhost=$(printf "$nameprefix%02d" 0)
 allhosts="$adminhost $osdhosts"
 checkmkhost=$adminhost		# currently not used.
 cephchef=cephchef		# the user we bootstrap with.
@@ -38,30 +42,18 @@ osd_gen_label=2026
 hcloud_network_zone="eu-central"				# eu-central includes hel, nbg, fsn, ...
 ansible_dir_name=ceph-deployment-hcloud-$nameprefix		# a local directory, where checkout and patch ansible files
 
-mon_host_count=5
 if [ $mon_host_count -gt $osd_host_count ]; then
   mon_host_count=3
 fi
 
-monhosts=""
-for mon in $(seq 0 $(($mon_host_count - 1))); do
-  monhosts="$monhosts$nameprefix$mon
-"
-done
+monhosts="$(printf "$nameprefix%02d\n" $(seq 0 $(($mon_host_count - 1))))"
+mgrhosts="$(printf "$nameprefix%02d\n" $(seq 0 $(($mgr_host_count - 1))))"
+mdshosts="$(printf "$nameprefix%02d\n" $(seq $(($osd_host_count - $mds_host_count + 1)) $osd_host_count))"
 
-mgr_host_count=3
-mgrhosts=""
-for mgr in $(seq 0 $(($mgr_host_count - 1))); do
-  mgrhosts="$mgrhosts$nameprefix$mgr
-"
-done
-
-mds_host_count=3
-mdshosts=""
-for mds in $(seq 0 $(($mds_host_count - 1))); do
-  mdshosts="$mdshosts$nameprefix$(($osd_host_count - $mds))
-"
-done
+echo allhosts: $allhosts
+echo monhosts: $monhosts
+echo mgrhosts: $mgrhosts
+echo mdshosts: $mdshosts
 
 
 sshr ()
@@ -102,10 +94,12 @@ sshr ()
   rm -f $sshlog
 }
 
+
 ssh_admin()
 {
   sshr root@$adminhost.$domain "$@"
 }
+
 
 wait_for_progress()
 {
@@ -205,7 +199,7 @@ for host in $allhosts; do
 done
 rm -rf $KEYDIR
 
-sshr $cephchef@$adminhost.$domain "for i in 1 2 3 4; do ssh -o 'StrictHostKeyChecking=accept-new' $nameprefix\$i hostname; done"	# accept the host keys...
+sshr $cephchef@$adminhost.$domain "for host in $osdhosts; do ssh -o 'StrictHostKeyChecking=accept-new' \$host hostname; done"	# accept the host keys...
 
 
 if [ ! -d $ansible_dir_name ]; then
@@ -243,9 +237,8 @@ for host in $allhosts; do
   hcloud server attach-to-network --network $net_name $host
   # find the interface name, this appears to be racy, as we just maniplated networks. better wait a bit.
   # sshr just exits with exit code 1, without printing anything when it fails here. No retry, nothing seems to trigger.
-  sleep 2; echo .
-  sleep 2; echo .
-  sleep 2; echo .
+  sleep 3; echo .
+  sleep 3; echo .
   net_match=$(sshr root@$host.$domain ip -4 -o addr show | grep -s $subnet_prefix)
   interface=$(echo $net_match | sed -e 's@\S\S*\s\(\S\S*\).*@\1@')
   ipaddr=$(echo $net_match | sed -e 's@.*\sinet\s\([0-9\.]*\).*@\1@')
@@ -516,4 +509,6 @@ ssh_admin ceph osd df tree
 ssh_admin ceph osd pool ls detail
 ssh_admin ceph fs status
 
-
+# ceph auth get-or-create client.cephfs mon 'allow r' mds 'allow rw' osd 'allow rw pool=cephfs.CEPHFS.data' mgr 'allow r' -o /etc/ceph/ceph.client.cephfs.keyring
+# mount -t ceph :/ /mnt/cephfs -o name=cephfs,fs=CEPHFS
+# echo huhu >  /mnt/cephfs/testfile.txt
